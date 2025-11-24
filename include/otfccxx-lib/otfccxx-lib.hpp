@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -7,26 +8,91 @@
 #include <memory>
 #include <optional>
 #include <otfcc/font.h>
+#include <otfcc/options.h>
 #include <otfcc/primitives.h>
 #include <otfcc/table/cmap.h>
 #include <otfcc/table/glyf.h>
 #include <otfcc/vf/vq.h>
+#include <sds.h>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace otfccxx {
-namespace detail {
+enum class err : int {
+    noError = 0,
+    attemptToAccessNullptr
+};
 
+namespace detail {
 // Caryll vector. Namespace providing modernish C++ interface to caryll vector based types
 namespace cv {
 inline auto get_rngInterface(auto &caryll_vector_t) {
     return std::span<decltype(caryll_vector_t.items)>(&caryll_vector_t.items, caryll_vector_t.length);
 };
-
-
 } // namespace cv
 
+
+template <typename T>
+struct lambda_traits : lambda_traits<decltype(&T::operator())> {};
+
+// For non-const operator()
+template <typename C, typename R, typename... Args>
+struct lambda_traits<R (C::*)(Args...)> {
+    using result_type = R;
+    using arg_types   = std::tuple<Args...>;
+};
+
+// For const operator()
+template <typename C, typename R, typename... Args>
+struct lambda_traits<R (C::*)(Args...) const> {
+    using result_type = R;
+    using arg_types   = std::tuple<Args...>;
+};
+
+// --- Wrapper storing lambda and producing callback + env ---
+
+template <typename LAM, typename T>
+struct CCallbackWrapper {
+    LAM lambda;
+
+    static bool thunk(const T *a, void *env) {
+        auto *self = static_cast<CCallbackWrapper *>(env);
+        return self->lambda(a);
+    }
+};
+
+// Factory returning {thunk, env}
+template <typename LAM>
+auto make_cLike_unaryPredicate(LAM &&lambda) {
+    using traits  = lambda_traits<std::decay_t<LAM>>;
+    using T       = std::tuple_element_t<0, typename traits::arg_types>;
+    using Pointee = std::remove_pointer_t<T>;
+    using Wrapper = CCallbackWrapper<std::decay_t<LAM>, Pointee>;
+
+    // Ensure lambda taken only one argument
+    static_assert(std::tuple_size_v<typename traits::arg_types> == 1,
+                  "Lambda must unary predicate lambda must take one and only one argument");
+
+    // Ensure lambda looks like bool(const T*)
+    static_assert(std::is_pointer_v<T> || std::is_const_v<std::remove_pointer_t<T>>,
+                  "Lambda must take (const T*) as first argument");
+
+
+    struct cLike_unaryPred {
+        bool    (*lamCallOp_fn)(const Pointee *, void *);
+        void   *captured;
+        Wrapper storage;
+    };
+
+    cLike_unaryPred r{&Wrapper::thunk, nullptr, {std::forward<LAM>(lambda)}};
+    r.captured = &r.storage;
+    return r;
+}
+
+} // namespace detail
+
+namespace glyph {
 inline void Transform(glyf_Glyph &glyph, double a, double b, double c, double d, double dx, double dy) {
 
     auto adj_VQstill = [](VQ &VQ_out, auto const &func) {
@@ -60,12 +126,12 @@ inline void Transform(glyf_Glyph &glyph, double a, double b, double c, double d,
         }
     };
 
-    for (auto &one_cont : cv::get_rngInterface(glyph.contours)) {
-        for (auto &one_gp : cv::get_rngInterface((*one_cont))) { transform_porr(one_gp); }
+    for (auto &one_cont : detail::cv::get_rngInterface(glyph.contours)) {
+        for (auto &one_gp : detail::cv::get_rngInterface((*one_cont))) { transform_porr(one_gp); }
     }
-    for (auto &one_refer : cv::get_rngInterface(glyph.references)) { transform_porr(one_refer); }
+    for (auto &one_refer : detail::cv::get_rngInterface(glyph.references)) { transform_porr(one_refer); }
 }
-} // namespace detail
+} // namespace glyph
 
 
 class Font {
@@ -91,25 +157,62 @@ public:
         return res;
     }
 
-    std::optional<int> filter_cmap(auto const &&filterFunc) {
+    // Maintenance
+    void consolidate(uint8_t optimize_level = 0) const {
+        auto options = otfcc_newOptions();
+        otfcc_Options_optimizeTo(options, optimize_level);
+        otfcc_iFont.consolidate(handle_.get(), options);
+        otfcc_deleteOptions(options);
+    }
+
+
+    // Filtering
+    std::optional<err> filter_cmap(auto const &&filterFunc) {
         if (not handle_->cmap) { return std::nullopt; }
         auto &cmapRef = *(handle_->cmap);
 
         std::vector<int> ids_toUnmap;
         for (cmap_Entry const *item = cmapRef.unicodes; item != nullptr; item = (cmap_Entry *)item->hh.next) {
             cmap_Entry const &ref = *item;
-            if (not filterFunc(ref)) { ids_toUnmap.push_back(ref.unicode); cmapRef.unicodes->glyph }
+            if (not filterFunc(ref)) { ids_toUnmap.push_back(ref.unicode); }
         }
 
-
-
-
         for (auto const toUnmap : ids_toUnmap) { table_iCmap.unmap(handle_->cmap, toUnmap); }
-
         return std::nullopt;
     }
 
-    std::optional<int> filter_glyphs(auto const &&filterFunc) { return std::nullopt; }
+    std::expected<std::vector<int>, err> filter_glyphs_inPlace(std::vector<int> const &charCodes_toKeep) {
+        if (handle_->cmap == nullptr) { return std::unexpected(err::attemptToAccessNullptr); }
+        auto &cmapRef = *(handle_->cmap);
+
+        std::vector<sds> namesToKeep;
+        std::vector<int> toKeep_butMissing;
+        for (cmap_Entry const *item = cmapRef.unicodes; item != nullptr; item = (cmap_Entry *)item->hh.next) {
+            if (std::ranges::find(charCodes_toKeep, item->unicode) != charCodes_toKeep.end()) {
+                namesToKeep.push_back(sdsdup(item->glyph.name));
+            }
+            else { toKeep_butMissing.push_back(item->unicode); }
+        }
+
+        auto filt = [&](glyf_Glyph *const *glyph_ptr) -> bool {
+            if (std::ranges::find(namesToKeep, (*glyph_ptr)->name) != namesToKeep.end()) { return true; }
+            return false;
+        };
+
+        auto cLike_ff = detail::make_cLike_unaryPredicate(filt);
+        table_iGlyf.filterEnv(handle_->glyf, cLike_ff.lamCallOp_fn, cLike_ff.captured);
+        consolidated = false;
+        return toKeep_butMissing;
+    }
+
+    std::optional<err> filter_glyphs_inPlace(auto const &&filterFunc) {
+        if (handle_->glyf == nullptr) { return err::attemptToAccessNullptr; }
+
+        auto cLike_ff = detail::make_cLike_unaryPredicate(filterFunc);
+        table_iGlyf.filterEnv(handle_->glyf, cLike_ff.lamCallOp_fn, cLike_ff.captured);
+        consolidated = false;
+        return std::nullopt;
+    }
 
 
 private:
@@ -125,18 +228,19 @@ private:
     };
 
     std::unique_ptr<otfcc_Font, Deleter> handle_;
+    bool                                 consolidated = false;
 };
 
 
 class FontMerger {
 public:
-    static std::optional<int> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge) {
+    static std::optional<err> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge) {
         FontMerger fm(out_base, out_toMerge);
         if (auto errOpt = fm._merge(); errOpt.has_value()) { return errOpt; }
         else { return std::nullopt; }
         std::unreachable();
     }
-    static std::expected<Font, int> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge) {
+    static std::expected<Font, err> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge) {
         // Make copies, because we are not doing it inPlace
         Font base_res = out_base.copy_deep();
 
@@ -150,14 +254,14 @@ public:
     }
 
 
-    static std::optional<int> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge,
+    static std::optional<err> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge,
                                                      std::vector<int> const &codePointsToKeep) {
         FontMerger fm(out_base, out_toMerge);
         if (auto errOpt = fm._merge(codePointsToKeep); errOpt.has_value()) { return errOpt; }
         else { return std::nullopt; }
         std::unreachable();
     }
-    static std::expected<Font, int> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge,
+    static std::expected<Font, err> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge,
                                                    std::vector<int> const &codePointsToKeep) {
         // Make copies, because we are not doing it inPlace
         Font base_res = out_base.copy_deep();
@@ -172,9 +276,16 @@ public:
     }
 
 private:
-    std::optional<int> _merge() { return std::optional(1); }
+    std::optional<err> _merge() { return err::noError; }
 
-    std::optional<int> _merge(std::vector<int> const &codePointsToKeep) { return std::optional(1); }
+    std::optional<err> _merge(std::vector<int> const &codePointsToKeep) { return err::noError; }
+
+
+    // Prep
+    void _consolidate_fonts() {
+        base.consolidate();
+        for (auto const &oneFont : others) { oneFont.consolidate(); }
+    }
 
     FontMerger(Font &base, std::vector<Font> &toMerge) : base{base}, others(toMerge) {}
 
