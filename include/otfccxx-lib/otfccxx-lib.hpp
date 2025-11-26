@@ -1,296 +1,121 @@
 #pragma once
 
+
 #include <algorithm>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
 #include <expected>
-#include <memory>
-#include <optional>
+#include <nlohmann/json.hpp>
 #include <otfcc/font.h>
-#include <otfcc/options.h>
-#include <otfcc/primitives.h>
-#include <otfcc/table/cmap.h>
-#include <otfcc/table/glyf.h>
-#include <otfcc/vf/vq.h>
-#include <sds.h>
-#include <span>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <ranges>
+
 
 namespace otfccxx {
 enum class err : int {
     noError = 0,
-    attemptToAccessNullptr
+    uknownError,
+    jsonFontMissingCmapTable,
+    jsonFontMissingGlyfTable,
+    jsonFontCorrupted,
+    someRequiredCodePointsNotPresent
 };
 
-namespace detail {
-// Caryll vector. Namespace providing modernish C++ interface to caryll vector based types
-namespace cv {
-inline auto get_rngInterface(auto &caryll_vector_t) {
-    return std::span<decltype(caryll_vector_t.items)>(&caryll_vector_t.items, caryll_vector_t.length);
-};
-} // namespace cv
-
-
-template <typename T>
-struct lambda_traits : lambda_traits<decltype(&T::operator())> {};
-
-// For non-const operator()
-template <typename C, typename R, typename... Args>
-struct lambda_traits<R (C::*)(Args...)> {
-    using result_type = R;
-    using arg_types   = std::tuple<Args...>;
-};
-
-// For const operator()
-template <typename C, typename R, typename... Args>
-struct lambda_traits<R (C::*)(Args...) const> {
-    using result_type = R;
-    using arg_types   = std::tuple<Args...>;
-};
-
-// --- Wrapper storing lambda and producing callback + env ---
-
-template <typename LAM, typename T>
-struct CCallbackWrapper {
-    LAM lambda;
-
-    static bool thunk(const T *a, void *env) {
-        auto *self = static_cast<CCallbackWrapper *>(env);
-        return self->lambda(a);
-    }
-};
-
-// Factory returning {thunk, env}
-template <typename LAM>
-auto make_cLike_unaryPredicate(LAM &&lambda) {
-    using traits  = lambda_traits<std::decay_t<LAM>>;
-    using T       = std::tuple_element_t<0, typename traits::arg_types>;
-    using Pointee = std::remove_pointer_t<T>;
-    using Wrapper = CCallbackWrapper<std::decay_t<LAM>, Pointee>;
-
-    // Ensure lambda taken only one argument
-    static_assert(std::tuple_size_v<typename traits::arg_types> == 1,
-                  "Lambda must unary predicate lambda must take one and only one argument");
-
-    // Ensure lambda looks like bool(const T*)
-    static_assert(std::is_pointer_v<T> || std::is_const_v<std::remove_pointer_t<T>>,
-                  "Lambda must take (const T*) as first argument");
-
-
-    struct cLike_unaryPred {
-        bool    (*lamCallOp_fn)(const Pointee *, void *);
-        void   *captured;
-        Wrapper storage;
-    };
-
-    cLike_unaryPred r{&Wrapper::thunk, nullptr, {std::forward<LAM>(lambda)}};
-    r.captured = &r.storage;
-    return r;
-}
-
-} // namespace detail
-
-namespace glyph {
-inline void Transform(glyf_Glyph &glyph, double a, double b, double c, double d, double dx, double dy) {
-
-    auto adj_VQstill = [](VQ &VQ_out, auto const &func) {
-        func(VQ_out.kernel);
-        for (size_t j = 0; j < VQ_out.shift.length; j++) {
-            if (VQ_out.shift.items[j].type == VQ_STILL) { func(VQ_out.shift.items[j].val.still); }
-        }
-    };
-    auto multStill = [&](pos_t &out_still) { out_still = std::round(a * out_still); };
-    adj_VQstill(glyph.advanceWidth, multStill);
-    adj_VQstill(glyph.advanceHeight, multStill);
-
-    auto transform_porr = [&](auto &out_porr) {
-        auto &one_gp_ref = (*out_porr);
-        VQ    xCpy       = iVQ.dup(one_gp_ref.x);
-
-        one_gp_ref.x.kernel = static_cast<int>(a * xCpy.kernel + b * one_gp_ref.y.kernel + dx);
-        for (size_t j = 0; j < one_gp_ref.x.shift.length; j++) {
-            if (one_gp_ref.x.shift.items[j].type == VQ_STILL) {
-                one_gp_ref.x.shift.items[j].val.still = static_cast<int>(
-                    a * xCpy.shift.items[j].val.still + b * one_gp_ref.y.shift.items[j].val.still + dx);
-            }
-        }
-
-        one_gp_ref.y.kernel = static_cast<int>(c * xCpy.kernel + d * one_gp_ref.y.kernel + dy);
-        for (size_t j = 0; j < one_gp_ref.y.shift.length; j++) {
-            if (one_gp_ref.y.shift.items[j].type == VQ_STILL) {
-                one_gp_ref.y.shift.items[j].val.still = static_cast<int>(
-                    c * xCpy.shift.items[j].val.still + d * one_gp_ref.y.shift.items[j].val.still + dy);
-            }
-        }
-    };
-
-    for (auto &one_cont : detail::cv::get_rngInterface(glyph.contours)) {
-        for (auto &one_gp : detail::cv::get_rngInterface((*one_cont))) { transform_porr(one_gp); }
-    }
-    for (auto &one_refer : detail::cv::get_rngInterface(glyph.references)) { transform_porr(one_refer); }
-}
-} // namespace glyph
-
+class FontMerger;
 
 class Font {
-private:
+    friend FontMerger;
+
+    using NLMjson = nlohmann::ordered_json;
+
 public:
-    explicit Font() : handle_{otfcc_iFont.create()} {
-        // if (! handle_) { throw std::runtime_error("Failed to create CThing"); }
-    }
-    explicit Font(otfcc_SplineFontContainer &sfnt, uint32_t index, otfcc_Options const &options)
-        : handle_(Ctor_(sfnt, index, options)) {}
-
-    // Non-copyable, but movable
-    Font(Font &&) noexcept            = default;
-    Font &operator=(Font &&) noexcept = default;
-
-    Font copy_deep() const {
-        Font res = Font();
-        if (handle_) {
-            otfcc_Font *CpyPtr;
-            otfcc_iFont.copy(CpyPtr, handle_.get());
-            res.handle_.reset(CpyPtr);
-        }
-        return res;
-    }
-
-    // Maintenance
-    void consolidate(uint8_t optimize_level = 0) const {
-        auto options = otfcc_newOptions();
-        otfcc_Options_optimizeTo(options, optimize_level);
-        otfcc_iFont.consolidate(handle_.get(), options);
-        otfcc_deleteOptions(options);
-    }
+    Font(NLMjson &&jsonFont) : font_(std::move(jsonFont)) {}
 
 
     // Filtering
-    std::optional<err> filter_cmap(auto const &&filterFunc) {
-        if (not handle_->cmap) { return std::nullopt; }
-        auto &cmapRef = *(handle_->cmap);
-
-        std::vector<int> ids_toUnmap;
-        for (cmap_Entry const *item = cmapRef.unicodes; item != nullptr; item = (cmap_Entry *)item->hh.next) {
-            cmap_Entry const &ref = *item;
-            if (not filterFunc(ref)) { ids_toUnmap.push_back(ref.unicode); }
-        }
-
-        for (auto const toUnmap : ids_toUnmap) { table_iCmap.unmap(handle_->cmap, toUnmap); }
-        return std::nullopt;
-    }
-
     std::expected<std::vector<int>, err> filter_glyphs_inPlace(std::vector<int> const &charCodes_toKeep) {
-        if (handle_->cmap == nullptr) { return std::unexpected(err::attemptToAccessNullptr); }
-        auto &cmapRef = *(handle_->cmap);
 
-        std::vector<sds> namesToKeep;
+        // Instead of deleting we will insert into a 'cleaned' copy only those charCodes that we want/need
+        NLMjson res = font_;
+
+        auto cmapIT = res.find("cmap");
+        if (cmapIT == res.end()) { return std::unexpected(err::jsonFontMissingCmapTable); }
+        auto &cmp = (*cmapIT);
+        cmp.clear();
+
+        auto glyfIT = res.find("glyf");
+        if (glyfIT == res.end()) { return std::unexpected(err::jsonFontMissingGlyfTable); }
+        auto &glf = (*glyfIT);
+        glf.clear();
+
+        // Those CCs not found in the original font be kept here and returned
         std::vector<int> toKeep_butMissing;
-        for (cmap_Entry const *item = cmapRef.unicodes; item != nullptr; item = (cmap_Entry *)item->hh.next) {
-            if (std::ranges::find(charCodes_toKeep, item->unicode) != charCodes_toKeep.end()) {
-                namesToKeep.push_back(sdsdup(item->glyph.name));
+
+        auto &orig_cmp = *(font_.find("cmap"));
+        auto &orig_glf = *(font_.find("glyf"));
+
+        std::unordered_set<std::string> alreadyAdded;
+        for (auto const one_toKeep : charCodes_toKeep) {
+            auto item_it = orig_cmp.find(std::to_string(one_toKeep));
+
+            std::vector<std::pair<std::string, std::string>>        toAddCmp;
+            std::vector<std::pair<std::string, decltype(*item_it)>> toAddGlyf;
+            std::unordered_set<std::string>                         alreadyExplored;
+
+            auto adder = [&](this auto &self, decltype(item_it) const &orig_cmp_iter) -> bool {
+                // It must not have been added before
+                // It must not have been already explored (protects against cyclic dependendencies)
+                if (not alreadyAdded.contains(orig_cmp_iter.key()) &&
+                    alreadyExplored.insert(orig_cmp_iter.key()).second) {
+
+                    auto orig_glf_iter = orig_glf.find(*orig_cmp_iter);
+                    // There must be a glyf associated
+                    if (orig_glf_iter != orig_glf.end()) {
+                        if (auto ref_iter = orig_glf_iter->find("references"); ref_iter != orig_glf_iter->end()) {
+                            // If the glyf contains some references to other glyfs
+                            for (auto &[_, val] : ref_iter->items()) {
+                                if (auto refName_iter = val.find("glyph"); refName_iter != val.end()) {
+                                    // Find whether a referenced glyf exists in CMap
+                                    auto cmpToRef_iter =
+                                        std::find_if(orig_cmp.begin(), orig_cmp.end(),
+                                                     [&](auto const &elem) { return elem == (*refName_iter); });
+                                    // If the referenced glyf is not found in the Cmap then false all the way up
+                                    if (cmpToRef_iter == orig_cmp.end()) { return false; }
+                                    // If the recursion returns false then also return false
+                                    if (not self(cmpToRef_iter)) { return false; }
+                                }
+                            }
+                        }
+                        toAddCmp.push_back({orig_cmp_iter.key(), *orig_cmp_iter});
+                        toAddGlyf.push_back({orig_glf_iter.key(), *orig_glf_iter});
+                        alreadyAdded.insert(orig_cmp_iter.key());
+                    }
+                    else { return false; }
+                }
+                return true;
+            };
+
+            if (item_it != orig_cmp.end() && adder(item_it)) {
+                for (auto rIter = toAddCmp.rbegin(); rIter != toAddCmp.rend(); ++rIter) {
+                    cmp.push_back({rIter->first, rIter->second});
+                }
+                for (auto rIter = toAddGlyf.rbegin(); rIter != toAddGlyf.rend(); ++rIter) {
+                    glf.push_back({rIter->first, rIter->second});
+                }
             }
-            else { toKeep_butMissing.push_back(item->unicode); }
+            else { toKeep_butMissing.push_back(one_toKeep); }
         }
 
-        auto filt = [&](glyf_Glyph *const *glyph_ptr) -> bool {
-            if (std::ranges::find(namesToKeep, (*glyph_ptr)->name) != namesToKeep.end()) { return true; }
-            return false;
-        };
-
-        auto cLike_ff = detail::make_cLike_unaryPredicate(filt);
-        table_iGlyf.filterEnv(handle_->glyf, cLike_ff.lamCallOp_fn, cLike_ff.captured);
-        consolidated = false;
+        // Replace with a filtered copy
+        font_ = res;
         return toKeep_butMissing;
     }
 
-    std::optional<err> filter_glyphs_inPlace(auto const &&filterFunc) {
-        if (handle_->glyf == nullptr) { return err::attemptToAccessNullptr; }
-
-        auto cLike_ff = detail::make_cLike_unaryPredicate(filterFunc);
-        table_iGlyf.filterEnv(handle_->glyf, cLike_ff.lamCallOp_fn, cLike_ff.captured);
-        consolidated = false;
-        return std::nullopt;
-    }
-
 
 private:
-    static otfcc_Font *Ctor_(otfcc_SplineFontContainer const &sfnt, uint32_t index, otfcc_Options const &options) {
-        otfcc_IFontBuilder *reader = otfcc_newOTFReader();
-        auto                res = reader->read((otfcc_SplineFontContainer *)(&sfnt), index, (otfcc_Options *)&options);
-        reader->free(reader);
-        return res;
-    }
-
-    struct Deleter {
-        void operator()(otfcc_Font *ptr) const noexcept { otfcc_iFont.free(ptr); }
-    };
-
-    std::unique_ptr<otfcc_Font, Deleter> handle_;
-    bool                                 consolidated = false;
-};
-
-
-class FontMerger {
-public:
-    static std::optional<err> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge) {
-        FontMerger fm(out_base, out_toMerge);
-        if (auto errOpt = fm._merge(); errOpt.has_value()) { return errOpt; }
-        else { return std::nullopt; }
-        std::unreachable();
-    }
-    static std::expected<Font, err> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge) {
-        // Make copies, because we are not doing it inPlace
-        Font base_res = out_base.copy_deep();
-
-        std::vector<Font> toMerge_cpy;
-        for (auto const &mrg_font : toMerge) { toMerge_cpy.push_back(mrg_font.copy_deep()); }
-        FontMerger fm(base_res, toMerge_cpy);
-
-        if (auto errOpt = fm._merge(); errOpt.has_value()) { return std::unexpected(errOpt.value()); }
-        else { return base_res; }
-        std::unreachable();
-    }
-
-
-    static std::optional<err> merge_intoBase_inPlace(Font &out_base, std::vector<Font> &out_toMerge,
-                                                     std::vector<int> const &codePointsToKeep) {
-        FontMerger fm(out_base, out_toMerge);
-        if (auto errOpt = fm._merge(codePointsToKeep); errOpt.has_value()) { return errOpt; }
-        else { return std::nullopt; }
-        std::unreachable();
-    }
-    static std::expected<Font, err> merge_intoBase(Font const &out_base, std::vector<Font> const &toMerge,
-                                                   std::vector<int> const &codePointsToKeep) {
-        // Make copies, because we are not doing it inPlace
-        Font base_res = out_base.copy_deep();
-
-        std::vector<Font> toMerge_cpy;
-        for (auto const &mrg_font : toMerge) { toMerge_cpy.push_back(mrg_font.copy_deep()); }
-        FontMerger fm(base_res, toMerge_cpy);
-
-        if (auto errOpt = fm._merge(codePointsToKeep); errOpt.has_value()) { return std::unexpected(errOpt.value()); }
-        else { return base_res; }
-        std::unreachable();
-    }
-
-private:
-    std::optional<err> _merge() { return err::noError; }
-
-    std::optional<err> _merge(std::vector<int> const &codePointsToKeep) { return err::noError; }
-
-
-    // Prep
-    void _consolidate_fonts() {
-        base.consolidate();
-        for (auto const &oneFont : others) { oneFont.consolidate(); }
-    }
-
-    FontMerger(Font &base, std::vector<Font> &toMerge) : base{base}, others(toMerge) {}
-
-    Font              &base;
-    std::vector<Font> &others;
+    NLMjson font_;
 };
 
 
