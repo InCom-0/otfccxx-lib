@@ -1,14 +1,80 @@
 #pragma once
 
 #include <expected>
+#include <filesystem>
 #include <fstream>
 
 
 #include <otfccxx-lib/fontsmith.hpp>
+#include <system_error>
 #include <utility>
 
 
 namespace fontsmith {
+struct AccessInfo {
+    bool readable;
+    bool writable;
+};
+inline std::expected<AccessInfo, std::filesystem::file_type> check_access(const std::filesystem::path &p) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // Resolve symlink (follows by default)
+    auto ft = fs::status(p, ec).type();
+    if (ec || ft == fs::file_type::not_found) { return std::unexpected(fs::file_type::not_found); }
+
+    // Only allow normal files and directories
+    if (ft != fs::file_type::regular && ft != fs::file_type::directory) { return std::unexpected(ft); }
+
+    AccessInfo res{false, false};
+
+    // ---- Regular file ----
+    if (ft == fs::file_type::regular) {
+        res.readable = std::ifstream(p).good();
+        res.writable = std::ofstream(p, std::ios::app).good();
+    }
+
+    // ---- Directory ----
+    else if (ft == fs::file_type::directory) {
+        // Check directory readability by attempting to iterate
+        fs::directory_iterator it(p, ec);
+        res.readable = ! ec;
+
+        // Check directory writability by trying to create a temp file
+        auto          testfile = p / ".fs_test.tmp";
+        std::ofstream ofs(testfile);
+        if (ofs.good()) {
+            res.writable = true;
+            ofs.close();
+            fs::remove(testfile, ec);
+        }
+    }
+
+    return res;
+}
+
+std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
+                                                                         std::span<const std::byte>   bytes) {
+    if (not p.has_filename()) { return std::unexpected(std::filesystem::file_type::not_found); }
+    if (p.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(p.parent_path(), ec);
+        if (ec) { return false; }
+    }
+    else { return std::unexpected(std::filesystem::file_type::not_found); }
+
+    if (auto exp_accInfo = check_access(p.parent_path()); not exp_accInfo.has_value()) {
+        return std::unexpected(exp_accInfo.error());
+    }
+    else if (not exp_accInfo.value().writable) { return false; }
+
+    std::ofstream outs(p, std::ios::binary);
+    if (! outs) { return false; }
+
+    outs.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size_bytes()));
+    return outs.good();
+}
+
 
 // Adding FontFaces
 Subsetter &Subsetter::add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex) {
@@ -30,6 +96,75 @@ Subsetter &Subsetter::add_ff_lastResort(std::span<const char> buf, unsigned int 
     return *this;
 }
 
+
+Subsetter &Subsetter::add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
+
+    if (auto exp_access = check_access(pth); exp_access.has_value()) {
+        if (exp_access->readable) {
+            std::ifstream file(pth, std::ios::binary);
+            if (! file) { goto RET; }
+
+            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            if (data.empty()) { goto RET; }
+
+            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                ffs_toSubset.push_back(std::move(toInsert.value()));
+            }
+        }
+    }
+RET:
+    return *this;
+}
+Subsetter &Subsetter::add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
+    if (auto exp_access = check_access(pth); exp_access.has_value()) {
+        if (exp_access->readable) {
+            std::ifstream file(pth, std::ios::binary);
+            if (! file) { goto RET; }
+
+            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            if (data.empty()) { goto RET; }
+
+            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                ffs_categoryBackup.push_back(std::move(toInsert.value()));
+            }
+        }
+    }
+RET:
+    return *this;
+}
+Subsetter &Subsetter::add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
+    if (auto exp_access = check_access(pth); exp_access.has_value()) {
+        if (exp_access->readable) {
+            std::ifstream file(pth, std::ios::binary);
+            if (! file) { goto RET; }
+
+            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            if (data.empty()) { goto RET; }
+
+            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                ffs_lastResort.push_back(std::move(toInsert.value()));
+            }
+        }
+    }
+RET:
+    return *this;
+}
+
+
+Subsetter &Subsetter::add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex) {
+    if (ptr) { ffs_toSubset.push_back(hb_face_uptr(ptr)); }
+    return *this;
+}
+Subsetter &Subsetter::add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex) {
+    if (ptr) { ffs_categoryBackup.push_back(hb_face_uptr(ptr)); }
+    return *this;
+}
+Subsetter &Subsetter::add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex) {
+    if (ptr) { ffs_lastResort.push_back(hb_face_uptr(ptr)); }
+    return *this;
+}
+
+
 // Adding unicode character points and/or glyph IDs
 
 Subsetter &Subsetter::add_toKeep_CP(hb_codepoint_t const cp) {
@@ -38,7 +173,7 @@ Subsetter &Subsetter::add_toKeep_CP(hb_codepoint_t const cp) {
 }
 
 Subsetter &Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
-    for (auto &cp : cps) { hb_set_add(toKeep_unicodeCPs.get(), cp); }
+    for (auto const &cp : cps) { hb_set_add(toKeep_unicodeCPs.get(), cp); }
     return *this;
 }
 
@@ -90,6 +225,7 @@ std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> Subsetter:
         else { res.push_back(std::move(exp_ff.value())); }
     }
 
+
 RET:
     return std::make_pair(std::move(res), hb_set_uptr(hb_set_copy(toKeep_unicodeCPs.get())));
 }
@@ -97,7 +233,7 @@ RET:
 
 // PRIVATE METHODS
 std::expected<hb_face_uptr, err> Subsetter::make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
-    hb_blob_uptr blob(hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_READONLY, nullptr, nullptr));
+    hb_blob_uptr blob(hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
     if (! blob) { return std::unexpected(err::hb_blob_t_createFailure); }
 
     // Create face from blob

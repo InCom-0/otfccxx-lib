@@ -42,6 +42,10 @@ using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, decltype([](hb_s
                                                  if (si) { hb_subset_input_destroy(si); }
                                              })>;
 
+
+std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
+                                                                  std::span<const std::byte>   bytes);
+
 class Subsetter {
 
 public:
@@ -53,11 +57,15 @@ public:
     Subsetter &add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
     Subsetter &add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
 
+    Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex = 0u);
 
     Subsetter &add_toKeep_CP(hb_codepoint_t cp);
     Subsetter &add_toKeep_CPs(std::span<const hb_codepoint_t> cps);
 
-
+    // 1) execute() - Get 'waterfall of font faces'
+    // 2) execute_bestEffort() - Get 'waterfall of font faces' + set a unicode points that weren't found in any font
     std::expected<std::vector<hb_face_uptr>, err>                         execute();
     std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> execute_bestEffort();
 
@@ -74,12 +82,23 @@ private:
 
     hb_set_uptr toKeep_unicodeCPs;
 
+    // 1) ffs_toSubset - Main font(s) to subset
+    // 2) ffs_categoryBackup - Fonts that may be included as a whole (the intended usecase is for already minified fonts
+    // include eg. one unicode character category only)
+    // 3) ffs_lastResort - If after going through the above we still have some unicodeCPs to keep (because they are NOT
+    // in either of the above) ... font faces with large unicode CP coverage are good here (ie. Iosevka)
     std::vector<hb_face_uptr> ffs_toSubset;
     std::vector<hb_face_uptr> ffs_categoryBackup;
     std::vector<hb_face_uptr> ffs_lastResort;
 
 
     std::optional<err> inError = std::nullopt;
+};
+
+
+class CompatMaker {
+public:
+private:
 };
 
 } // namespace fontsmith
