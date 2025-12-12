@@ -1,9 +1,6 @@
-#pragma once
-
 #include <expected>
 #include <filesystem>
 #include <fstream>
-
 
 #include <otfccxx-lib/fontsmith.hpp>
 #include <system_error>
@@ -54,7 +51,7 @@ inline std::expected<AccessInfo, std::filesystem::file_type> check_access(const 
 }
 
 std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
-                                                                         std::span<const std::byte>   bytes) {
+                                                                  std::span<const std::byte>   bytes) {
     if (not p.has_filename()) { return std::unexpected(std::filesystem::file_type::not_found); }
     if (p.has_parent_path()) {
         std::error_code ec;
@@ -179,7 +176,6 @@ Subsetter &Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) 
 
 
 // Execution
-
 std::expected<std::vector<hb_face_uptr>, err> Subsetter::execute() {
     if (auto res = execute_bestEffort(); res.has_value()) {
         if (hb_set_is_empty(res.value().second.get())) { return std::move(res.value().first); }

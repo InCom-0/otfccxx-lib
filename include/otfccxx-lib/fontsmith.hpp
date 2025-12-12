@@ -1,7 +1,5 @@
 #pragma once
 
-#include "hb-subset.h"
-#include "hb.h"
 #include <expected>
 #include <filesystem>
 
@@ -27,20 +25,33 @@ enum class err : size_t {
     make_subset_noIntersectingGlyphs,
     unexpectedNullptr,
 };
-using hb_face_uptr = std::unique_ptr<hb_face_t, decltype([](hb_face_t *f) noexcept {
-                                         if (f) { hb_face_destroy(f); }
-                                     })>;
-using hb_blob_uptr = std::unique_ptr<hb_blob_t, decltype([](hb_blob_t *b) noexcept {
-                                         if (b) { hb_blob_destroy(b); }
-                                     })>;
+namespace detail {
+struct _hb_face_uptr_deleter {
+    void operator()(hb_face_t *f) const noexcept {
+        if (f) { hb_face_destroy(f); }
+    }
+};
+struct _hb_blob_uptr_deleter {
+    void operator()(hb_blob_t *b) const noexcept {
+        if (b) { hb_blob_destroy(b); }
+    }
+};
+struct _hb_set_uptr_deleter {
+    void operator()(hb_set_t *s) const noexcept {
+        if (s) { hb_set_destroy(s); }
+    }
+};
+struct _hb_subset_input_uptr_deleter {
+    void operator()(hb_subset_input_t *s) const noexcept {
+        if (s) { hb_subset_input_destroy(s); }
+    }
+};
+} // namespace detail
 
-using hb_set_uptr = std::unique_ptr<hb_set_t, decltype([](hb_set_t *s) noexcept {
-                                        if (s) { hb_set_destroy(s); }
-                                    })>;
-
-using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, decltype([](hb_subset_input_t *si) noexcept {
-                                                 if (si) { hb_subset_input_destroy(si); }
-                                             })>;
+using hb_face_uptr         = std::unique_ptr<hb_face_t, detail::_hb_face_uptr_deleter>;
+using hb_blob_uptr         = std::unique_ptr<hb_blob_t, detail::_hb_blob_uptr_deleter>;
+using hb_set_uptr          = std::unique_ptr<hb_set_t, detail::_hb_set_uptr_deleter>;
+using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subset_input_uptr_deleter>;
 
 
 std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
@@ -49,6 +60,9 @@ std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesyste
 class Subsetter {
 
 public:
+    Subsetter() : toKeep_unicodeCPs(hb_set_create()) {}
+
+
     Subsetter &add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
     Subsetter &add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex = 0u);
     Subsetter &add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex = 0u);

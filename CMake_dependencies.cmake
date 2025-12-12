@@ -9,9 +9,11 @@ CPMAddPackage(
   EXCLUDE_FROM_ALL TRUE
 )
 
+set(HB_BUILD_UTILS ON)
 CPMAddPackage(
   NAME     harfbuzz
   URL      https://github.com/harfbuzz/harfbuzz/releases/download/12.2.0/harfbuzz-12.2.0.tar.xz
   URL_HASH SHA256=ecb603aa426a8b24665718667bda64a84c1504db7454ee4cadbd362eea64e545
   EXCLUDE_FROM_ALL TRUE
 )
+
