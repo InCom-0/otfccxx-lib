@@ -144,6 +144,7 @@ private:
             }
         }
     RET:
+        return;
     }
     void add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
@@ -160,6 +161,7 @@ private:
             }
         }
     RET:
+        return;
     }
     void add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
@@ -176,6 +178,7 @@ private:
             }
         }
     RET:
+        return;
     }
 
 

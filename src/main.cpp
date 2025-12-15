@@ -24,6 +24,6 @@ int main(int argc, char *argv[]) {
 
     out.flush();
 
-    std::cout << "Get lost \n";
+    std::cout << "Run finished\n";
     return 0;
 }
