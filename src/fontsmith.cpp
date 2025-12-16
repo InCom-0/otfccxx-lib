@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 #include <otfccxx-lib/fontsmith.hpp>
+#include <otfccxx-lib/fmem_file.hpp>
 
 
 namespace fontsmith {
@@ -386,14 +387,25 @@ err Subsetter::get_error() {
 
 class Modifier::Impl {
     friend class Modifier;
+    friend constexpr std::unique_ptr<Impl> std::make_unique<Impl>();
 
-public:
+private:
+    Impl() {};
+    Impl(font_raw const &ttf) {}
+
 private:
     nlohmann::ordered_json _jsonFont;
 };
 
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
+
+Modifier::Modifier(std::span<const std::byte> const &rawFont_ttf) {
+
+    otfccxx::fmem_file memfile(rawFont_ttf);
+
+    FILE *f = memfile.get();
+}
 
 
 // PRIVATE METHODS

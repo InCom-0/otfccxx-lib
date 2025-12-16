@@ -83,7 +83,7 @@ private:
 
 public:
     Modifier();
-    Modifier(font_raw const &);
+    Modifier(std::span<const std::byte> const &rawFont_ttf);
 
 
     std::expected<bool, err> change_unitsPerEm(uint32_t newEmSize);

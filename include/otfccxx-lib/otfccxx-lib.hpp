@@ -15,6 +15,8 @@
 #include <otfcc/font.h>
 #include <otfcc/sfnt.h>
 
+#include <stdio.h>
+
 namespace otfccxx {
 enum class err : int {
     noError = 0,

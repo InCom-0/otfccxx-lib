@@ -2,6 +2,7 @@ include(cmake/CPM.cmake)
 set(CPM_USE_LOCAL_PACKAGES_ORIG ${CPM_USE_LOCAL_PACKAGES})
 set(CPM_USE_LOCAL_PACKAGES ON)
 
+CPMAddPackage("gh:InCom-0/fmem#master")
 CPMAddPackage("gh:InCom-0/otfcc-lib_cmake#master")
 CPMAddPackage(
   NAME nlohmann_json
