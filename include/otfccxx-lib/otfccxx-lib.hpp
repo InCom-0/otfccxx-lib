@@ -1,19 +1,21 @@
 #pragma once
 
-
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <expected>
-#include <otfcc/options.h>
+
+#include <span>
 #include <stdio.h>
-#include <string>
 #include <utility>
 
-
+#include <json-builder.h>
 #include <nlohmann/json.hpp>
 #include <otfcc/font.h>
+#include <otfcc/options.h>
 #include <otfcc/sfnt.h>
+
+#include <otfccxx-lib/fmem_file.hpp>
 
 
 namespace otfccxx {
@@ -26,39 +28,113 @@ enum class err : size_t {
     jsonFontMissingGlyfTable,
     SFNT_cannotReadSFNT,
     SFNT_subfontIndexOutOfRange,
+    SFNT_fontStructureBrokenOrCorrupted,
 };
 
+class otfccxx_Options {
 
-inline std::expected<std::string, err> dump_toJSON(std::span<const std::byte> raw_ttfFont, otfcc_Options opts) {
+public:
+    explicit otfccxx_Options(otfcc_Options &obj) noexcept : ptr_(&obj) {}
+
+    explicit otfccxx_Options() noexcept { ptr_ = otfcc_newOptions(); }
+    explicit otfccxx_Options(uint8_t optLevel) noexcept {
+        ptr_ = otfcc_newOptions();
+        otfcc_Options_optimizeTo(ptr_, optLevel);
+    }
+
+    otfccxx_Options(const otfccxx_Options &)            = delete;
+    otfccxx_Options &operator=(const otfccxx_Options &) = delete;
+
+    ~otfccxx_Options() { otfcc_deleteOptions(ptr_); }
+
+
+    otfcc_Options *operator->() const noexcept { return ptr_; }
+    otfcc_Options &operator*() const noexcept { return *ptr_; }
+
+    // Optional explicit access
+    otfcc_Options &get() const noexcept { return *ptr_; }
+
+private:
+    otfcc_Options *ptr_; // non-owning
+};
+
+inline std::expected<nlohmann::ordered_json, err> dump_toNLMJSON(std::span<const std::byte> raw_ttfFont,
+                                                                 otfccxx_Options const     &opts) {
+
+    otfcc_SplineFontContainer *sfnt;
+    otfcc_Font                *curFont;
+    json_value                *root;
+
+    std::expected<nlohmann::ordered_json, err> res = err::uknownError;
+
+    fmem_file fmf(raw_ttfFont);
+
+    // Read sfnt
     {
-        otfcc_SplineFontContainer *sfnt;
-
-        // Read sfnt
-        {
-            FILE *file;
-            sfnt = otfcc_readSFNT(file);
-            if (! sfnt || sfnt->count == 0) { return std::unexpected(err::SFNT_cannotReadSFNT); }
-            if (0 >= sfnt->count) { return std::unexpected(err::SFNT_subfontIndexOutOfRange); }
+        sfnt = otfcc_readSFNT(fmf.get());
+        if (! sfnt) {
+            res = std::unexpected(err::SFNT_cannotReadSFNT);
+            goto RET;
         }
-
-        // Build otfcc representation of font
-        otfcc_Font *font;
-        {
-            otfcc_IFontBuilder *reader = otfcc_newOTFReader();
-            font                       = reader->read(sfnt, 0, options);
-            if (! font) {
-                logError("Font structure broken or corrupted \"%s\". Exit.\n", inPath);
-                exit(EXIT_FAILURE);
-            }
-            reader->free(reader);
-            if (sfnt) { otfcc_deleteSFNT(sfnt); }
+        if (0 >= sfnt->count) {
+            res = std::unexpected(err::SFNT_subfontIndexOutOfRange);
+            goto RET;
         }
     }
 
-    return {};
+    // Build otfcc representation of font
+    {
+        otfcc_IFontBuilder *reader = otfcc_newOTFReader();
+        curFont                    = reader->read(sfnt, 0, opts.operator->());
+        reader->free(reader);
+        if (! curFont) {
+            res = std::unexpected(err::SFNT_fontStructureBrokenOrCorrupted);
+            goto RET;
+        }
+    }
+
+    // otfcc Consolidate font
+    otfcc_iFont.consolidate(curFont, opts.operator->());
+
+    //  otfcc create JSON value representation from otfcc_Font
+    {
+        otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
+        root                          = (json_value *)dumper->serialize(curFont, opts.operator->());
+        dumper->free(dumper);
+        if (! root) {
+            res = std::unexpected(err::SFNT_fontStructureBrokenOrCorrupted);
+            goto RET;
+        }
+    }
+
+    //  Write serialized JSON data into a buffer
+    char  *buf;
+    size_t buflen;
+    {
+        json_serialize_opts jsonOptions;
+        jsonOptions.mode        = json_serialize_mode_packed;
+        jsonOptions.opts        = 0;
+        jsonOptions.indent_size = 4;
+
+        buflen = json_measure_ex(root, jsonOptions);
+        buf    = (char *)calloc(1, buflen);
+        json_serialize_ex(buf, root, jsonOptions);
+    }
+
+    // Create nlmJson representation
+    res = nlohmann::ordered_json::parse(std::span<char>(buf, buflen));
+    free(buf);
+
+RET:
+    if (root) { json_builder_free(root); }
+    if (curFont) { otfcc_iFont.free(curFont); }
+    if (sfnt) { otfcc_deleteSFNT(sfnt); }
+
+    return res;
 };
 
-inline std::expected<font_raw, err> build_fromJSON(std::span<const std::byte> raw_otfccJSONFont) {
+inline std::expected<font_raw, err> build_fromNLMJSON(nlohmann::ordered_json const &nlmJson,
+                                                      otfccxx_Options const        &opts) {
     return {};
 };
 

@@ -400,7 +400,7 @@ private:
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
-Modifier::Modifier(std::span<const std::byte> const &rawFont_ttf) {
+Modifier::Modifier(std::span<const std::byte> rawFont_ttf) {
 
     otfccxx::fmem_file memfile(rawFont_ttf);
 
