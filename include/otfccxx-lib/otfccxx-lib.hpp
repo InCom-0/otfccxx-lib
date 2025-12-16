@@ -1,31 +1,65 @@
 #pragma once
 
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <expected>
+#include <otfcc/options.h>
+#include <stdio.h>
 #include <string>
-#include <unordered_set>
 #include <utility>
-#include <vector>
+
 
 #include <nlohmann/json.hpp>
 #include <otfcc/font.h>
 #include <otfcc/sfnt.h>
 
-#include <stdio.h>
 
 namespace otfccxx {
-enum class err : int {
-    noError = 0,
-    uknownError,
-    jsonFontMissingCmapTable,
-    jsonFontMissingGlyfTable,
+using font_raw = std::vector<std::byte>;
+
+enum class err : size_t {
+    uknownError = 1,
+    unexpectedNullptr,
     jsonAdvanceWidthKeyNotFound,
-    jsonFontCorrupted,
-    someRequiredCodePointsNotPresent
+    jsonFontMissingGlyfTable,
+    SFNT_cannotReadSFNT,
+    SFNT_subfontIndexOutOfRange,
+};
+
+
+inline std::expected<std::string, err> dump_toJSON(std::span<const std::byte> raw_ttfFont, otfcc_Options opts) {
+    {
+        otfcc_SplineFontContainer *sfnt;
+
+        // Read sfnt
+        {
+            FILE *file;
+            sfnt = otfcc_readSFNT(file);
+            if (! sfnt || sfnt->count == 0) { return std::unexpected(err::SFNT_cannotReadSFNT); }
+            if (0 >= sfnt->count) { return std::unexpected(err::SFNT_subfontIndexOutOfRange); }
+        }
+
+        // Build otfcc representation of font
+        otfcc_Font *font;
+        {
+            otfcc_IFontBuilder *reader = otfcc_newOTFReader();
+            font                       = reader->read(sfnt, 0, options);
+            if (! font) {
+                logError("Font structure broken or corrupted \"%s\". Exit.\n", inPath);
+                exit(EXIT_FAILURE);
+            }
+            reader->free(reader);
+            if (sfnt) { otfcc_deleteSFNT(sfnt); }
+        }
+    }
+
+    return {};
+};
+
+inline std::expected<font_raw, err> build_fromJSON(std::span<const std::byte> raw_otfccJSONFont) {
+    return {};
 };
 
 

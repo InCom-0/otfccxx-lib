@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-
 #include <memory>
 #include <span>
 
@@ -16,19 +15,21 @@
 
 
 namespace fontsmith {
+using font_raw = std::vector<std::byte>;
 
 enum class err : size_t {
     uknownError = 1,
+    unexpectedNullptr,
     hb_blob_t_createFailure,
     hb_face_t_createFailure,
     execute_someRequestedGlyphsAreMissing,
     subsetInput_failedToCreate,
     hb_subset_executeFailure,
     make_subset_noIntersectingGlyphs,
-    unexpectedNullptr,
+    jsonAdvanceWidthKeyNotFound,
+    jsonFontMissingGlyfTable,
 };
 
-using font_raw = std::vector<std::byte>;
 
 std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
                                                                   std::span<const std::byte>   bytes);
@@ -83,7 +84,7 @@ private:
 
 public:
     Modifier();
-    Modifier(std::span<const std::byte> const &rawFont_ttf);
+    Modifier(std::span<const std::byte> rawFont_ttf);
 
 
     std::expected<bool, err> change_unitsPerEm(uint32_t newEmSize);
