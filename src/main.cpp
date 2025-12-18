@@ -4,7 +4,9 @@
 #include <iostream>
 
 #include <otfccxx-lib/otfccxx-lib.hpp>
-int main(int argc, char *argv[]) {
+
+int
+main(int argc, char *argv[]) {
 
     std::vector<uint32_t> keepThese{65, 75, 85, 97};
 

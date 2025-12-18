@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <utility>
 
-
 #include <hb-subset.hh>
 #include <json-builder.h>
 #include <nlohmann/json.hpp>
@@ -19,9 +18,7 @@
 #include <otfcc/options.h>
 #include <otfcc/sfnt.h>
 
-
 #include <otfccxx-lib/fmem_file.hpp>
-
 
 namespace otfccxx {
 using font_raw = std::vector<std::byte>;
@@ -36,7 +33,6 @@ enum class err : size_t {
     SFNT_fontStructureBrokenOrCorrupted,
 };
 
-
 enum class err_subset : size_t {
     unknownError = 1,
     unexpectedNullptr,
@@ -49,7 +45,6 @@ enum class err_subset : size_t {
     jsonAdvanceWidthKeyNotFound,
     jsonFontMissingGlyfTable,
 };
-
 
 enum class err_modifier : size_t {
     unknownError = 1,
@@ -72,70 +67,90 @@ public:
         otfcc_Options_optimizeTo(ptr_, optLevel);
     }
 
-    otfccxx_Options(const otfccxx_Options &)            = delete;
-    otfccxx_Options &operator=(const otfccxx_Options &) = delete;
+    otfccxx_Options(const otfccxx_Options &) = delete;
+    otfccxx_Options &
+    operator=(const otfccxx_Options &) = delete;
 
     ~otfccxx_Options() { otfcc_deleteOptions(ptr_); }
 
-
-    otfcc_Options *operator->() const noexcept { return ptr_; }
-    otfcc_Options &operator*() const noexcept { return *ptr_; }
+    otfcc_Options *
+    operator->() const noexcept {
+        return ptr_;
+    }
+    otfcc_Options &
+    operator*() const noexcept {
+        return *ptr_;
+    }
 
     // Optional explicit access
-    otfcc_Options &get() const noexcept { return *ptr_; }
+    otfcc_Options &
+    get() const noexcept {
+        return *ptr_;
+    }
 
 private:
     otfcc_Options *ptr_; // non-owning
 };
 
-
-std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
-                                                                  std::span<const std::byte>   bytes);
+std::expected<bool, std::filesystem::file_type>
+write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> bytes);
 
 class Subsetter {
 private:
     class Impl;
 
 public:
-    Subsetter();                                 // defined in the implementation file
+    Subsetter();                      // defined in the implementation file
 
-    ~Subsetter();                                // defined in the implementation file, where impl is a complete type
-    Subsetter(Subsetter &&) noexcept;            // defined in the implementation file
+    ~Subsetter();                     // defined in the implementation file, where impl is a complete
+                                      // type
+    Subsetter(Subsetter &&) noexcept; // defined in the implementation file
     Subsetter(const Subsetter &) = delete;
-    Subsetter &operator=(Subsetter &&) noexcept; // defined in the implementation file
-    Subsetter &operator=(const Subsetter &) = delete;
+    Subsetter &
+    operator=(Subsetter &&) noexcept; // defined in the implementation file
+    Subsetter &
+    operator=(const Subsetter &) = delete;
 
+    Subsetter &
+    add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    Subsetter &
+    add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    Subsetter &
+    add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex = 0u);
 
-    Subsetter &add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    Subsetter &
+    add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+    Subsetter &
+    add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+    Subsetter &
+    add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
 
-    Subsetter &add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex =
+    // 0u); Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const
+    // faceIndex = 0u); Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int
+    // const faceIndex = 0u);
 
-    // Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex = 0u);
-    // Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex = 0u);
-    // Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex = 0u);
-
-    Subsetter &add_toKeep_CP(uint32_t cp);
-    Subsetter &add_toKeep_CPs(std::span<const uint32_t> cps);
+    Subsetter &
+    add_toKeep_CP(uint32_t cp);
+    Subsetter &
+    add_toKeep_CPs(std::span<const uint32_t> cps);
 
     // 1) execute() - Get 'waterfall of font faces'
-    // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector) a unicode points that weren't found in
-    // any font
-    std::expected<std::vector<font_raw>, err_subset>                                   execute();
-    std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset> execute_bestEffort();
+    // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector)
+    // a unicode points that weren't found in any font
+    std::expected<std::vector<font_raw>, err_subset>
+    execute();
+    std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset>
+    execute_bestEffort();
 
-
-    bool       is_inError();
-    err_subset get_error();
-
+    bool
+    is_inError();
+    err_subset
+    get_error();
 
 private:
     std::unique_ptr<Impl> pimpl;
 };
-
 
 class Modifier {
 private:
@@ -145,26 +160,24 @@ public:
     Modifier();
     Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts);
 
+    std::expected<bool, err_subset>
+    change_unitsPerEm(uint32_t newEmSize);
+    std::expected<bool, err_subset>
+    change_makeMonospaced(uint32_t newAdvWidth);
 
-    std::expected<bool, err_subset> change_unitsPerEm(uint32_t newEmSize);
-    std::expected<bool, err_subset> change_makeMonospaced(uint32_t newAdvWidth);
-
-
-    std::expected<std::vector<font_raw>, err_subset> exportResult() {
+    std::expected<std::vector<font_raw>, err_subset>
+    exportResult() {
         if (! pimpl) { return std::unexpected(err_subset::unexpectedNullptr); }
-
 
         return std::unexpected(err_subset::unknownError);
     };
-
 
 private:
     std::unique_ptr<Impl> pimpl;
 };
 
-
-inline std::expected<nlohmann::ordered_json, err> dump_toNLMJSON(std::span<const std::byte> raw_ttfFont,
-                                                                 otfccxx_Options const     &opts) {
+inline std::expected<nlohmann::ordered_json, err>
+dump_toNLMJSON(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts) {
 
     otfcc_SplineFontContainer *sfnt;
     otfcc_Font                *curFont;
@@ -238,11 +251,10 @@ RET:
     return res;
 };
 
-inline std::expected<font_raw, err> build_fromNLMJSON(nlohmann::ordered_json const &nlmJson,
-                                                      otfccxx_Options const        &opts) {
+inline std::expected<font_raw, err>
+build_fromNLMJSON(nlohmann::ordered_json const &nlmJson, otfccxx_Options const &opts) {
     return {};
 };
-
 
 class Font {
     using NLMjson = nlohmann::ordered_json;
@@ -252,7 +264,8 @@ public:
     Font(NLMjson &&jsonFont) : font_(std::move(jsonFont)) {}
 
     // Glyph metric modification
-    static std::expected<bool, err> transform_glyphByAW(NLMjson &out_glyph, double const newWidth) {
+    static std::expected<bool, err>
+    transform_glyphByAW(NLMjson &out_glyph, double const newWidth) {
 
         auto aw_iter = out_glyph.find("advanceWidth");
         if (aw_iter == out_glyph.end()) { return std::unexpected(err::jsonAdvanceWidthKeyNotFound); }
@@ -286,7 +299,8 @@ public:
 
     // func must accept NLMjson & as a first (out)parameter for its call operator
     // Returns number of non-transformed glyphs
-    std::expected<size_t, err> transform_allGlyphs(auto &&func) {
+    std::expected<size_t, err>
+    transform_allGlyphs(auto &&func) {
         auto glyf_table = font_.find("glyf");
         if (glyf_table == font_.end()) { return std::unexpected(err::jsonFontMissingGlyfTable); }
 
@@ -298,14 +312,14 @@ public:
         return res;
     }
 
-
     // Erase methods
-    std::expected<bool, err> erase_glyphOrder() { return true; }
-
+    std::expected<bool, err>
+    erase_glyphOrder() {
+        return true;
+    }
 
 private:
     NLMjson font_;
 };
-
 
 } // namespace otfccxx

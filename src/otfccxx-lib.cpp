@@ -4,34 +4,39 @@
 #include <json.h>
 #include <memory>
 #include <span>
+#include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 #include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
-
 namespace otfccxx {
 
 namespace detail {
 struct _hb_face_uptr_deleter {
-    void operator()(hb_face_t *f) const noexcept {
+    void
+    operator()(hb_face_t *f) const noexcept {
         if (f) { hb_face_destroy(f); }
     }
 };
 struct _hb_blob_uptr_deleter {
-    void operator()(hb_blob_t *b) const noexcept {
+    void
+    operator()(hb_blob_t *b) const noexcept {
         if (b) { hb_blob_destroy(b); }
     }
 };
 struct _hb_set_uptr_deleter {
-    void operator()(hb_set_t *s) const noexcept {
+    void
+    operator()(hb_set_t *s) const noexcept {
         if (s) { hb_set_destroy(s); }
     }
 };
 struct _hb_subset_input_uptr_deleter {
-    void operator()(hb_subset_input_t *s) const noexcept {
+    void
+    operator()(hb_subset_input_t *s) const noexcept {
         if (s) { hb_subset_input_destroy(s); }
     }
 };
@@ -47,8 +52,8 @@ struct AccessInfo {
     bool writable;
 };
 
-
-static std::expected<AccessInfo, std::filesystem::file_type> check_access(const std::filesystem::path &p) {
+static std::expected<AccessInfo, std::filesystem::file_type>
+check_access(const std::filesystem::path &p) {
     namespace fs = std::filesystem;
     std::error_code ec;
 
@@ -86,8 +91,8 @@ static std::expected<AccessInfo, std::filesystem::file_type> check_access(const 
     return res;
 }
 
-std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
-                                                                  std::span<const std::byte>   bytes) {
+std::expected<bool, std::filesystem::file_type>
+write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> bytes) {
     if (not p.has_filename()) { return std::unexpected(std::filesystem::file_type::not_found); }
     if (p.has_parent_path()) {
         std::error_code ec;
@@ -115,24 +120,27 @@ public:
     Impl() : toKeep_unicodeCPs(hb_set_create()) {}
 
 private:
-    void add_ff_toSubset(std::span<const char> &buf, unsigned int const faceIndex) {
+    void
+    add_ff_toSubset(std::span<const char> &buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_toSubset.push_back(std::move(toInsert.value()));
         }
     }
-    void add_ff_categoryBackup(std::span<const char> &buf, unsigned int const faceIndex) {
+    void
+    add_ff_categoryBackup(std::span<const char> &buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_categoryBackup.push_back(std::move(toInsert.value()));
         }
     }
-    void add_ff_lastResort(std::span<const char> &buf, unsigned int const faceIndex) {
+    void
+    add_ff_lastResort(std::span<const char> &buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_lastResort.push_back(std::move(toInsert.value()));
         }
     }
 
-
-    void add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
+    void
+    add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
                 std::ifstream file(pth, std::ios::binary);
@@ -149,7 +157,8 @@ private:
     RET:
         return;
     }
-    void add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
+    void
+    add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
                 std::ifstream file(pth, std::ios::binary);
@@ -166,7 +175,8 @@ private:
     RET:
         return;
     }
-    void add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
+    void
+    add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
                 std::ifstream file(pth, std::ios::binary);
@@ -184,8 +194,8 @@ private:
         return;
     }
 
-
-    std::expected<hb_face_uptr, err_subset> make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
+    std::expected<hb_face_uptr, err_subset>
+    make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
         hb_blob_uptr blob(
             hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
         if (! blob) { return std::unexpected(err_subset::hb_blob_t_createFailure); }
@@ -197,8 +207,8 @@ private:
         return face;
     }
 
-
-    std::expected<hb_face_uptr, err_subset> make_subset(hb_face_t *ff) {
+    std::expected<hb_face_uptr, err_subset>
+    make_subset(hb_face_t *ff) {
         hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
         hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
 
@@ -221,11 +231,13 @@ private:
         hb_face_uptr res(hb_subset_or_fail(ff, si.get()));
         if (! res) { return std::unexpected(err_subset::hb_subset_executeFailure); }
 
-        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
+        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from
+        // 'ff'
         hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
         return res;
     }
-    std::expected<bool, err_subset> should_include_category(hb_face_t *ff) {
+    std::expected<bool, err_subset>
+    should_include_category(hb_face_t *ff) {
         hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
         hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
 
@@ -233,7 +245,8 @@ private:
 
         bool res = not hb_set_is_empty(unicodes_toKeep_in_ff.get());
 
-        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
+        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from
+        // 'ff'
         hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
         return res;
     }
@@ -241,84 +254,93 @@ private:
     hb_set_uptr toKeep_unicodeCPs;
 
     // 1) ffs_toSubset - Main font(s) to subset
-    // 2) ffs_categoryBackup - Fonts that may be included as a whole (the intended usecase is for already minified fonts
-    // include eg. one unicode character category only)
-    // 3) ffs_lastResort - If after going through the above we still have some unicodeCPs to keep (because they are NOT
-    // in either of the above) ... font faces with large unicode CP coverage are good here (ie. Iosevka)
+    // 2) ffs_categoryBackup - Fonts that may be included as a whole (the intended
+    // usecase is for already minified fonts include eg. one unicode character
+    // category only) 3) ffs_lastResort - If after going through the above we
+    // still have some unicodeCPs to keep (because they are NOT in either of the
+    // above) ... font faces with large unicode CP coverage are good here (ie.
+    // Iosevka)
     std::vector<hb_face_uptr> ffs_toSubset;
     std::vector<hb_face_uptr> ffs_categoryBackup;
     std::vector<hb_face_uptr> ffs_lastResort;
-
 
     std::optional<err_subset> inError = std::nullopt;
 };
 
 Subsetter::Subsetter() : pimpl(std::make_unique<Impl>()) {};
-Subsetter::~Subsetter()                                = default;
-Subsetter::Subsetter(Subsetter &&) noexcept            = default;
-Subsetter &Subsetter::operator=(Subsetter &&) noexcept = default;
-
+Subsetter::~Subsetter()                     = default;
+Subsetter::Subsetter(Subsetter &&) noexcept = default;
+Subsetter &
+Subsetter::operator=(Subsetter &&) noexcept = default;
 
 // Adding FontFaces
-Subsetter &Subsetter::add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex) {
     pimpl->add_ff_toSubset(buf, faceIndex);
     return *this;
 }
-Subsetter &Subsetter::add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex) {
     pimpl->add_ff_categoryBackup(buf, faceIndex);
     return *this;
 }
-Subsetter &Subsetter::add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex) {
     pimpl->add_ff_lastResort(buf, faceIndex);
     return *this;
 }
 
-
-Subsetter &Subsetter::add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
     pimpl->add_ff_toSubset(pth, faceIndex);
     return *this;
 }
-Subsetter &Subsetter::add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
     pimpl->add_ff_categoryBackup(pth, faceIndex);
     return *this;
 }
-Subsetter &Subsetter::add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
+Subsetter &
+Subsetter::add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
     pimpl->add_ff_lastResort(pth, faceIndex);
     return *this;
 }
 
-
-// Subsetter &Subsetter::add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex) {
+// Subsetter &Subsetter::add_ff_toSubset(hb_face_t *ptr, unsigned int const
+// faceIndex) {
 //     if (ptr) { ffs_toSubset.push_back(hb_face_uptr(ptr)); }
 //     return *this;
 // }
 
-// Subsetter &Subsetter::add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex) {
+// Subsetter &Subsetter::add_ff_categoryBackup(hb_face_t *ptr, unsigned int
+// const faceIndex) {
 //     if (ptr) { ffs_categoryBackup.push_back(hb_face_uptr(ptr)); }
 //     return *this;
 // }
 
-// Subsetter &Subsetter::add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex) {
+// Subsetter &Subsetter::add_ff_lastResort(hb_face_t *ptr, unsigned int const
+// faceIndex) {
 //     if (ptr) { ffs_lastResort.push_back(hb_face_uptr(ptr)); }
 //     return *this;
 // }
 
-
 // Adding unicode character points and/or glyph IDs
 
-Subsetter &Subsetter::add_toKeep_CP(hb_codepoint_t const cp) {
+Subsetter &
+Subsetter::add_toKeep_CP(hb_codepoint_t const cp) {
     hb_set_add(pimpl->toKeep_unicodeCPs.get(), cp);
     return *this;
 }
 
-Subsetter &Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
+Subsetter &
+Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
     for (auto const &cp : cps) { hb_set_add(pimpl->toKeep_unicodeCPs.get(), cp); }
     return *this;
 }
 
-
 // Execution
-std::expected<std::vector<font_raw>, err_subset> Subsetter::execute() {
+std::expected<std::vector<font_raw>, err_subset>
+Subsetter::execute() {
     if (auto res = execute_bestEffort(); res.has_value()) {
         if (res.value().second.empty()) { return std::move(res.value().first); }
         else { return std::unexpected(err_subset::execute_someRequestedGlyphsAreMissing); }
@@ -326,8 +348,8 @@ std::expected<std::vector<font_raw>, err_subset> Subsetter::execute() {
     else { return std::unexpected(res.error()); }
 }
 
-
-std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset> Subsetter::execute_bestEffort() {
+std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset>
+Subsetter::execute_bestEffort() {
     std::vector<hb_blob_uptr> res;
 
     for (auto &ff_to : pimpl->ffs_toSubset) {
@@ -363,7 +385,6 @@ std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subse
         else { res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get()))); }
     }
 
-
 RET:
     std::vector<uint32_t> resVec;
     for (auto const &item : *pimpl->toKeep_unicodeCPs.get()) { resVec.push_back(item); }
@@ -379,24 +400,27 @@ RET:
         std::move(resVec));
 }
 
-
-bool Subsetter::is_inError() {
+bool
+Subsetter::is_inError() {
     return pimpl->inError.has_value();
 }
-err_subset Subsetter::get_error() {
+err_subset
+Subsetter::get_error() {
     return pimpl->inError.value();
 }
 
 class Modifier::Impl {
     friend class Modifier;
-    friend constexpr std::unique_ptr<Impl> std::make_unique<Impl>();
+    friend constexpr std::unique_ptr<Impl>
+    std::make_unique<Impl>();
 
 private:
     class JSON_Access {
         friend class Modifier::Impl;
 
     private:
-        static inline struct _json_value *get(json_value const &rf, const char *key) {
+        static inline struct _json_value *
+        get(json_value const &rf, const char *key) {
             if (rf.type == json_object) {
                 for (unsigned int i = 0; i < rf.u.object.length; ++i) {
                     if (! strcmp(rf.u.object.values[i].name, key)) { return rf.u.object.values[i].value; }
@@ -405,7 +429,8 @@ private:
             return nullptr;
         }
 
-        static inline struct _json_value *get(json_value const &rf, int index) {
+        static inline struct _json_value *
+        get(json_value const &rf, int index) {
             if (rf.type != json_array || index < 0 || ((unsigned int)index) >= rf.u.array.length) { return nullptr; }
             return rf.u.array.values[index];
         }
@@ -415,9 +440,9 @@ private:
     Impl(font_raw const &ttf) {}
 
     // Glyph metric modification
-    static std::expected<bool, err_modifier> transform_glyphSize(json_value &out_glyph, double const a, double const b,
-                                                                 double const c, double const d, double const dx,
-                                                                 double const dy) {
+    static std::expected<bool, err_modifier>
+    transform_glyphSize(json_value &out_glyph, double const a, double const b, double const c, double const d,
+                        double const dx, double const dy) {
         auto const adw = [&]() -> std::expected<bool, err_modifier> { return _pureChange_ADW(out_glyph, a); };
         auto const adh = [&](bool const) -> std::expected<bool, err_modifier> { return _pureChange_ADH(out_glyph, d); };
         auto const vertO = [&](bool const) -> std::expected<bool, err_modifier> {
@@ -433,11 +458,18 @@ private:
         return adw().and_then(adh).and_then(vertO).and_then(cps).and_then(refAnch);
     }
 
-    static std::expected<bool, err_modifier> transform_glyphByAW(json_value &out_glyph, double const newWidth) {
+    // Must receive refMovesOfOther which specifies how much reference glyphs
+    // have/will be moved horizontally
+    static std::expected<bool, err_modifier>
+    transform_glyphByAW(json_value &out_glyph, double const newWidth,
+                        std::unordered_map<std::string, json_int_t> const &refMovesOfOther) {
+
         return std::unexpected(err_modifier::unknownError);
     }
 
-    static std::expected<bool, err_modifier> _pureChange_ADW(json_value &out_glyph, double const a) {
+    // 'Doubly' private not really for use by any other class
+    static std::expected<bool, err_modifier>
+    _pureChange_ADW(json_value &out_glyph, double const a) {
         auto adW = JSON_Access::get(out_glyph, "advanceWidth");
         if (adW == nullptr) { return std::unexpected(err_modifier::missingJSONKey); }
         else if (adW->type != json_type::json_integer) {
@@ -446,7 +478,8 @@ private:
         adW->u.integer = static_cast<json_int_t>(round(a * adW->u.integer));
         return true;
     }
-    static std::expected<bool, err_modifier> _pureChange_ADH(json_value &out_glyph, double const d) {
+    static std::expected<bool, err_modifier>
+    _pureChange_ADH(json_value &out_glyph, double const d) {
         auto adH = JSON_Access::get(out_glyph, "advanceHeight");
         if (adH != nullptr) {
             if (adH->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
@@ -455,7 +488,8 @@ private:
         }
         return false;
     }
-    static std::expected<bool, err_modifier> _pureChange_VertO(json_value &out_glyph, double const d) {
+    static std::expected<bool, err_modifier>
+    _pureChange_VertO(json_value &out_glyph, double const d) {
         auto vertO = JSON_Access::get(out_glyph, "verticalOrigin");
         if (vertO != nullptr) {
             if (vertO->type != json_type::json_integer) {
@@ -467,9 +501,9 @@ private:
         return false;
     }
 
-    static std::expected<bool, err_modifier> _pureChange_CPs(json_value &out_glyph, double const a, double const b,
-                                                             double const c, double const d, double const dx,
-                                                             double const dy) {
+    static std::expected<bool, err_modifier>
+    _pureChange_CPs(json_value &out_glyph, double const a, double const b, double const c, double const d,
+                    double const dx, double const dy) {
         auto countours = JSON_Access::get(out_glyph, "contours");
         if (countours != nullptr) {
             if (countours->type != json_type::json_array) {
@@ -514,9 +548,9 @@ private:
         return false;
     }
 
-    static std::expected<bool, err_modifier> _pureChange_RefAnchors(json_value &out_glyph, double const a,
-                                                                    double const b, double const c, double const d,
-                                                                    double const dx, double const dy) {
+    static std::expected<bool, err_modifier>
+    _pureChange_RefAnchors(json_value &out_glyph, double const a, double const b, double const c, double const d,
+                           double const dx, double const dy) {
         auto references = JSON_Access::get(out_glyph, "references");
         if (references != nullptr) {
             if (references->type != json_type::json_array) {
@@ -556,10 +590,15 @@ private:
         return false;
     }
 
+    static std::expected<std::unordered_map<std::string, json_int_t>, err_modifier>
+    _compute_refMoves(double const newWidth) {
+
+        return std::unordered_map<std::string, json_int_t>{};
+    }
+
 private:
     nlohmann::ordered_json _jsonFont;
 };
-
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
@@ -569,7 +608,6 @@ Modifier::Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const
 
     // FILE *f = memfile.get();
 }
-
 
 // PRIVATE METHODS
 

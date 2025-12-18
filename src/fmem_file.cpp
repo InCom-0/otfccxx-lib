@@ -3,7 +3,6 @@
 #include <cstring>
 #include <stdexcept>
 
-
 namespace otfccxx {
 fmem_file::fmem_file(std::span<const std::byte> data) : mem_(new fmem{}), file_(nullptr) {
     fmem_init(mem_);
@@ -44,7 +43,8 @@ fmem_file::fmem_file(fmem_file &&other) noexcept : mem_(other.mem_), file_(other
     other.file_ = nullptr;
 }
 
-fmem_file &fmem_file::operator=(fmem_file &&other) noexcept {
+fmem_file &
+fmem_file::operator=(fmem_file &&other) noexcept {
     if (this != &other) {
         if (file_) { fclose(file_); }
 
@@ -62,7 +62,8 @@ fmem_file &fmem_file::operator=(fmem_file &&other) noexcept {
     return *this;
 }
 
-FILE *fmem_file::get() const noexcept {
+FILE *
+fmem_file::get() const noexcept {
     return file_;
 }
 } // namespace otfccxx

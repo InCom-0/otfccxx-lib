@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <span>
 
-
 // Forward-declare fmem (opaque to users of the header)
 extern "C" {
 #include <fmem.h>
@@ -21,15 +20,18 @@ public:
     ~fmem_file();
 
     // non-copyable
-    fmem_file(const fmem_file &)            = delete;
-    fmem_file &operator=(const fmem_file &) = delete;
+    fmem_file(const fmem_file &) = delete;
+    fmem_file &
+    operator=(const fmem_file &) = delete;
 
     // movable
     fmem_file(fmem_file &&other) noexcept;
-    fmem_file &operator=(fmem_file &&other) noexcept;
+    fmem_file &
+    operator=(fmem_file &&other) noexcept;
 
     // Access underlying FILE*
-    FILE *get() const noexcept;
+    FILE *
+    get() const noexcept;
 
 private:
     fmem *mem_;  // owned
