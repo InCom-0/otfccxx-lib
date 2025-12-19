@@ -2,11 +2,14 @@
 #include <filesystem>
 #include <fstream>
 #include <json.h>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -411,8 +414,12 @@ Subsetter::get_error() {
 
 class Modifier::Impl {
     friend class Modifier;
-    friend constexpr std::unique_ptr<Impl>
-    std::make_unique<Impl>();
+
+public:
+    Impl() {}
+    Impl(font_raw const &ttf) {}
+
+    ~Impl() = default;
 
 private:
     class JSON_Access {
@@ -436,8 +443,11 @@ private:
         }
     };
 
-    Impl() {}
-    Impl(font_raw const &ttf) {}
+    struct HLPR_glyphByAW {
+        json_int_t origLSB = 0;
+        json_int_t movedBy = 0;
+    };
+
 
     // Glyph metric modification
     static std::expected<bool, err_modifier>
@@ -462,7 +472,7 @@ private:
     // have/will be moved horizontally
     static std::expected<bool, err_modifier>
     transform_glyphByAW(json_value &out_glyph, double const newWidth,
-                        std::unordered_map<std::string, json_int_t> const &refMovesOfOther) {
+                        std::unordered_map<std::string, HLPR_glyphByAW> const &refMovesOfOther) {
 
         return std::unexpected(err_modifier::unknownError);
     }
@@ -590,14 +600,98 @@ private:
         return false;
     }
 
-    static std::expected<std::unordered_map<std::string, json_int_t>, err_modifier>
-    _compute_refMoves(double const newWidth) {
+    std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
+    _compute_refMoves(json_int_t const newWidth) {
+        std::unordered_map<std::string, HLPR_glyphByAW> res{};
+        std::unordered_set<std::string>                 cycleChecker{};
 
-        return std::unordered_map<std::string, json_int_t>{};
+        auto gt_ptr = JSON_Access::get(_jsonFont, "glyf");
+        if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+        auto const &glyfs = *gt_ptr;
+
+        std::unordered_map<std::string, struct _json_value *> mapOfRefs;
+        for (auto const &glyf : glyfs.u.object) {
+            mapOfRefs.insert({std::string(glyf.name, glyf.name_length), glyf.value});
+        }
+
+
+        auto recSolver = [&](this auto const &self, std::string const &toSolve) -> std::expected<bool, err_modifier> {
+            if (cycleChecker.contains(toSolve)) { return std::unexpected(err_modifier::cyclicGlyfReferencesFound); }
+            else if (res.contains(toSolve)) { return false; }
+
+            // Get the object we are supposed to be solving
+            auto ite = mapOfRefs.find(toSolve);
+            if (ite == mapOfRefs.end()) { return std::unexpected(err_modifier::missingGlyphInGlyfTable); }
+            auto solveObj = ite->second;
+            if (solveObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+            // Get advanceWidth (that must be there)
+            auto adwObj = JSON_Access::get(*solveObj, "advanceWidth");
+            if (adwObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+            if (adwObj->type != json_type::json_integer) {
+                return std::unexpected(err_modifier::unexpectedJSONValueType);
+            }
+
+            // Get the contours (if N/A then skip)
+            auto contoursObj = JSON_Access::get(*solveObj, "contours");
+            if (contoursObj != nullptr) {
+                json_int_t leftBearing = std::numeric_limits<json_int_t>::max();
+
+                if (contoursObj->type != json_type::json_array) {
+                    return std::unexpected(err_modifier::unexpectedJSONValueType);
+                }
+                for (auto countr : contoursObj->u.array) {
+                    if (countr->type != json_type::json_array) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+                    for (auto cp : countr->u.array) {
+                        if (cp->type != json_type::json_object) {
+                            return std::unexpected(err_modifier::unexpectedJSONValueType);
+                        }
+                        auto cp_xPos = JSON_Access::get(*cp, "x");
+                        if (cp_xPos->type != json_type::json_integer) {
+                            return std::unexpected(err_modifier::unexpectedJSONValueType);
+                        }
+                        // Update minimum value
+                        leftBearing = std::min(leftBearing, cp_xPos->u.integer);
+                    }
+                }
+
+                // Update res;
+            }
+
+            // Get the references (if N/A then skip)
+            auto refesObj = JSON_Access::get(*solveObj, "references");
+            if (refesObj != nullptr) {
+                if (contoursObj != nullptr) {
+                    { return std::unexpected(err_modifier::glyphHasBothCountoursAndReferences); }
+                }
+
+
+                cycleChecker.insert(toSolve);
+
+                self("next");
+
+                if (cycleChecker.erase(toSolve) != 1uz) { return std::unexpected(err_modifier::unknownError); }
+
+
+                // Update res;
+            }
+
+            return true;
+        };
+
+
+        auto ttt = recSolver("aa");
+        if (not ttt.has_value()) { return std::unexpected(ttt.error()); }
+
+
+        return res;
     }
 
 private:
-    nlohmann::ordered_json _jsonFont;
+    json_value _jsonFont;
 };
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}

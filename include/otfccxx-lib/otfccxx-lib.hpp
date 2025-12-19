@@ -53,6 +53,9 @@ enum class err_modifier : size_t {
     unexpectedJSONValueType,
     counterPointHasCorruptedStructure,
     referenceHasCorruptedStructure,
+    cyclicGlyfReferencesFound,
+    missingGlyphInGlyfTable,
+    glyphHasBothCountoursAndReferences,
 };
 
 // Simply wraps otfcc_Options
