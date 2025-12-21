@@ -1,20 +1,22 @@
-#include <cstddef>
-#include <expected>
 #include <filesystem>
 #include <fstream>
-#include <json.h>
 #include <limits>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <system_error>
+#include <ranges>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 
-#include <nlohmann/json.hpp>
+#include <json.h>
+#include <json-builder.h>
+
+#include <hb.hh>
+#include <hb-set.hh>
+#include <hb-subset.h>
+
+#include <otfcc/font.h>
+#include <otfcc/options.h>
+#include <otfcc/sfnt.h>
 #include <otfccxx-lib/fmem_file.hpp>
+
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
 namespace otfccxx {
@@ -478,8 +480,19 @@ private:
     }
 
     std::expected<size_t, err_modifier>
-    transform_glyphsSize(double const a, double const b, double const c, double const d, double const dx,
-                         double const dy) {
+    transform_glyphsSize(uint32_t newEmSize) {
+
+        auto ht_ptr = JSON_Access::get(_jsonFont, "head");
+        if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (ht_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+        auto upem = JSON_Access::get(*ht_ptr, "unitsPerEm");
+        if (upem == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (upem->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+        double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0,
+                     d = (static_cast<double>(newEmSize) / upem->u.integer), dx = 0, dy = 0;
+
         auto gt_ptr = JSON_Access::get(_jsonFont, "glyf");
         if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
@@ -505,7 +518,7 @@ private:
     // Must receive refMovesOfOther which specifies how much reference glyphs
     // have/will be moved horizontally
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
-    transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW = _Detail::default_ksADW) {
+    transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
         std::unordered_map<std::string, HLPR_glyphByAW> res{};
         std::unordered_set<std::string>                 cycleChecker{};
 
@@ -784,6 +797,20 @@ Modifier::Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const
 
     // FILE *f = memfile.get();
 }
+
+std::expected<bool, err_modifier>
+Modifier::change_unitsPerEm(uint32_t newEmSize) {
+    auto exp_res = pimpl->transform_glyphsSize(newEmSize);
+    if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
+    return true;
+}
+std::expected<bool, err_modifier>
+Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
+    auto exp_res = pimpl->transform_glyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
+    if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
+    return true;
+}
+
 
 // PRIVATE METHODS
 
