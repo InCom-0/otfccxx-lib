@@ -1,22 +1,21 @@
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
 
-#include <json.h>
 #include <json-builder.h>
+#include <json.h>
 
-#include <hb.hh>
+
 #include <hb-set.hh>
 #include <hb-subset.h>
 
-#include <otfcc/font.h>
-#include <otfcc/options.h>
-#include <otfcc/sfnt.h>
 #include <otfccxx-lib/fmem_file.hpp>
-
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
 namespace otfccxx {
@@ -421,8 +420,36 @@ class Modifier::Impl {
 public:
     Impl() {}
     Impl(font_raw const &ttf) {}
+    Impl(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts, uint32_t ttcindex = 0) {
+        otfccxx::fmem_file memfile(raw_ttfFont);
 
-    ~Impl() = default;
+        otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
+        if (! sfnt || sfnt->count == 0) { std::exit(1); }
+        if (ttcindex >= sfnt->count) { std::exit(1); }
+
+        // Build font
+        otfcc_IFontBuilder *reader = otfcc_newOTFReader();
+        otfcc_Font         *font   = reader->read(sfnt, ttcindex, &opts.get());
+        if (! font) { std::exit(1); }
+
+        // Free no longer needed stuff
+        reader->free(reader);
+        if (sfnt) { otfcc_deleteSFNT(sfnt); }
+
+        // Consolidate
+        otfcc_iFont.consolidate(font, &opts.get());
+
+
+        otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
+        _jsonFont                     = (json_value *)dumper->serialize(font, &opts.get());
+
+        if (! _jsonFont) { std::exit(1); }
+        dumper->free(dumper);
+    }
+
+    ~Impl() {
+        if (_jsonFont) { json_builder_free(_jsonFont); }
+    };
 
 private:
     class JSON_Access {
@@ -481,8 +508,8 @@ private:
 
     std::expected<size_t, err_modifier>
     transform_glyphsSize(uint32_t newEmSize) {
-
-        auto ht_ptr = JSON_Access::get(_jsonFont, "head");
+        if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        auto ht_ptr = JSON_Access::get(*_jsonFont, "head");
         if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (ht_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
 
@@ -492,8 +519,9 @@ private:
 
         double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0,
                      d = (static_cast<double>(newEmSize) / upem->u.integer), dx = 0, dy = 0;
+        upem->u.integer = newEmSize;
 
-        auto gt_ptr = JSON_Access::get(_jsonFont, "glyf");
+        auto gt_ptr = JSON_Access::get(*_jsonFont, "glyf");
         if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
         auto const &glyfs = *gt_ptr;
@@ -519,10 +547,12 @@ private:
     // have/will be moved horizontally
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
     transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
+        if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
         std::unordered_map<std::string, HLPR_glyphByAW> res{};
         std::unordered_set<std::string>                 cycleChecker{};
 
-        auto gt_ptr = JSON_Access::get(_jsonFont, "glyf");
+        auto gt_ptr = JSON_Access::get(*_jsonFont, "glyf");
         if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
         auto const &glyfs = *gt_ptr;
@@ -661,6 +691,31 @@ private:
         return res;
     }
 
+
+    std::expected<font_raw, err_modifier>
+    exportResult(otfccxx_Options const &opts) {
+
+        otfcc_Font         *font;
+        otfcc_IFontBuilder *parser = otfcc_newJsonReader();
+        font                       = parser->read(_jsonFont, 0, &opts.get());
+
+        parser->free(parser);
+        if (! font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        otfcc_iFont.consolidate(font, &opts.get());
+
+
+        otfcc_IFontSerializer *writer = otfcc_newOTFWriter();
+        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, &opts.get());
+        if (! otf) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        font_raw res(otf->size);
+        std::memcpy(res.data(), otf->data, otf->size);
+
+        return res;
+    }
+
+
     // 'Doubly' private not really for use by any other class
     static std::expected<bool, err_modifier>
     _pureChange_ADW(json_value &out_glyph, double const a) {
@@ -764,6 +819,7 @@ private:
                     else if (i == 2 && oneRef_item.value->type == json_type::json_integer) {
                         origY = oneRef_item.value->u.integer;
                     }
+                    else if (i > 2) { break; }
                     else { return std::unexpected(err_modifier::referenceHasCorruptedStructure); }
                     i++;
                 }
@@ -775,6 +831,7 @@ private:
                     else if (i == 2 && oneRef_item.value->type == json_type::json_integer) {
                         oneRef_item.value->u.integer = static_cast<json_int_t>(c * origX + d * origY + dy);
                     }
+                    else if (i > 2) { break; }
                     else { return std::unexpected(err_modifier::referenceHasCorruptedStructure); }
                     i++;
                 }
@@ -786,18 +843,17 @@ private:
 
 
 private:
-    json_value _jsonFont;
+    json_value *_jsonFont;
 };
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
-Modifier::Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts) {
+Modifier::Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts, uint32_t ttcindex)
+    : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
 
-    otfccxx::fmem_file memfile(raw_ttfFont);
+Modifier::~Modifier() = default;
 
-    // FILE *f = memfile.get();
-}
-
+// Changing dimensions of glyphs
 std::expected<bool, err_modifier>
 Modifier::change_unitsPerEm(uint32_t newEmSize) {
     auto exp_res = pimpl->transform_glyphsSize(newEmSize);
@@ -810,6 +866,19 @@ Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
+
+// Filtering of font content (ie. deleting parts of the font)
+
+
+// Modifications of other values and properties
+
+
+// Export
+std::expected<font_raw, err_modifier>
+Modifier::exportResult(otfccxx_Options const &opts) {
+    if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    else { return pimpl->exportResult(opts); }
+};
 
 
 // PRIVATE METHODS

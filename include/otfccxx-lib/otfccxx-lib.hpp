@@ -2,15 +2,14 @@
 
 #include <expected>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <utility>
 
-#include <vector>
 #include <cstddef>
+#include <vector>
 
-#include <otfcc/font.h>
-#include <otfcc/options.h>
-#include <otfcc/sfnt.h>
+#include <otfcc/otfcc_api.h>
 
 
 namespace otfccxx {
@@ -55,11 +54,13 @@ enum class err_modifier : size_t {
 class otfccxx_Options {
 
 public:
-
     explicit otfccxx_Options() noexcept { ptr_ = otfcc_newOptions(); }
     explicit otfccxx_Options(uint8_t optLevel) noexcept {
         ptr_ = otfcc_newOptions();
         otfcc_Options_optimizeTo(ptr_, optLevel);
+        ptr_->logger = otfcc_newLogger(otfcc_newStdErrTarget());
+        ptr_->logger->indent(ptr_->logger, "[missing]");
+        ptr_->decimal_cmap = true;
     }
 
     otfccxx_Options(const otfccxx_Options &) = delete;
@@ -153,19 +154,25 @@ private:
 
 public:
     Modifier();
-    Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts);
+    Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts = otfccxx::otfccxx_Options(1),
+             uint32_t ttcindex = 0);
+    ~Modifier();
 
+    // Changing dimensions of glyphs
     std::expected<bool, err_modifier>
     change_unitsPerEm(uint32_t newEmSize);
     std::expected<bool, err_modifier>
     change_makeMonospaced(uint32_t targetAdvWidth);
 
-    std::expected<std::vector<font_raw>, err_modifier>
-    exportResult() {
-        if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    // Filtering of font content (ie. deleting parts of the font)
 
-        return std::unexpected(err_modifier::unknownError);
-    };
+
+    // Modifications of other values and properties
+
+
+    // Export
+    std::expected<font_raw, err_modifier>
+    exportResult(otfccxx_Options const &opts = otfccxx::otfccxx_Options(1));
 
 private:
     std::unique_ptr<Impl> pimpl;
