@@ -25,13 +25,7 @@ main(int argc, char *argv[]) {
 
     std::ofstream out(outFile, std::ios::binary);
 
-
-    // out.write(reinterpret_cast<const char *>(res.value().front().data()),
-    //           static_cast<std::streamsize>(res.value().front().size()));
-
-    out.write(reinterpret_cast<const char *>(res2.value().data()), static_cast<std::streamsize>(res2.value().size()));
-
-    out.flush();
+    if (not otfccxx::write_bytesToFile(outFile, res2.value()).has_value()) { std::exit(1); }
 
     std::cout << "Run finished\n";
     return 0;

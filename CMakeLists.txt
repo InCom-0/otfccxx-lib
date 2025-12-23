@@ -4,7 +4,7 @@ project(otfccxx-lib
   HOMEPAGE_URL "https://github.com/InCom-0/otfccxx-lib"
   VERSION "0.0.0"
   DESCRIPTION
-  "Library for programmatic modifying and/or splicing (combining or merging) OpenType fonts. Provides granual control on a 'per glyph' or 'per codepoint' basis."
+  "Library for programmatic modifications of OpenType fonts. Focused on font subsetting and modifications of glyph sizes and advance width."
   LANGUAGES CXX C)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 

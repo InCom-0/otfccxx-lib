@@ -132,6 +132,7 @@ write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> byt
     if (! outs) { return false; }
 
     outs.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size_bytes()));
+    outs.flush();
     return outs.good();
 }
 
