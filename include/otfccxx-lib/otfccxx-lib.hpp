@@ -9,8 +9,6 @@
 #include <cstddef>
 #include <vector>
 
-#include <otfcc/otfcc_api.h>
-
 
 namespace otfccxx {
 using font_raw = std::vector<std::byte>;
@@ -24,7 +22,6 @@ enum class err : size_t {
     SFNT_subfontIndexOutOfRange,
     SFNT_fontStructureBrokenOrCorrupted,
 };
-
 enum class err_subset : size_t {
     unknownError = 1,
     unexpectedNullptr,
@@ -37,7 +34,6 @@ enum class err_subset : size_t {
     jsonAdvanceWidthKeyNotFound,
     jsonFontMissingGlyfTable,
 };
-
 enum class err_modifier : size_t {
     unknownError = 1,
     unexpectedNullptr,
@@ -50,43 +46,6 @@ enum class err_modifier : size_t {
     glyphHasBothCountoursAndReferences,
 };
 
-// Simply wraps otfcc_Options
-class otfccxx_Options {
-
-public:
-    explicit otfccxx_Options() noexcept { ptr_ = otfcc_newOptions(); }
-    explicit otfccxx_Options(uint8_t optLevel) noexcept {
-        ptr_ = otfcc_newOptions();
-        otfcc_Options_optimizeTo(ptr_, optLevel);
-        ptr_->logger = otfcc_newLogger(otfcc_newStdErrTarget());
-        ptr_->logger->indent(ptr_->logger, "[missing]");
-        ptr_->decimal_cmap = true;
-    }
-
-    otfccxx_Options(const otfccxx_Options &) = delete;
-    otfccxx_Options &
-    operator=(const otfccxx_Options &) = delete;
-
-    ~otfccxx_Options() { otfcc_deleteOptions(ptr_); }
-
-    otfcc_Options *
-    operator->() const noexcept {
-        return ptr_;
-    }
-    otfcc_Options &
-    operator*() const noexcept {
-        return *ptr_;
-    }
-
-    // Optional explicit access
-    otfcc_Options &
-    get() const noexcept {
-        return *ptr_;
-    }
-
-private:
-    otfcc_Options *ptr_; // non-owning
-};
 
 std::expected<bool, std::filesystem::file_type>
 write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> bytes);
@@ -148,14 +107,37 @@ private:
     std::unique_ptr<Impl> pimpl;
 };
 
+
+// Forward declaration to be able to be a friend of 'Options'
+class Modifier;
+
+// Simply wraps otfcc_Options
+class Options {
+private:
+    class Impl;
+    friend class Modifier;
+
+public:
+    explicit Options() noexcept;
+    explicit Options(uint8_t optLevel) noexcept;
+
+    Options(const Options &) = delete;
+    Options &
+    operator=(const Options &) = delete;
+
+    ~Options();
+
+private:
+    std::unique_ptr<Impl> pimpl;
+};
+
 class Modifier {
 private:
     class Impl;
 
 public:
     Modifier();
-    Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts = otfccxx::otfccxx_Options(1),
-             uint32_t ttcindex = 0);
+    Modifier(std::span<const std::byte> raw_ttfFont, Options const &opts = otfccxx::Options(1), uint32_t ttcindex = 0);
     ~Modifier();
 
     // Changing dimensions of glyphs
@@ -172,91 +154,10 @@ public:
 
     // Export
     std::expected<font_raw, err_modifier>
-    exportResult(otfccxx_Options const &opts = otfccxx::otfccxx_Options(1));
+    exportResult(Options const &opts = otfccxx::Options(1));
 
 private:
     std::unique_ptr<Impl> pimpl;
 };
-
-// inline std::expected<nlohmann::ordered_json, err>
-// dump_toNLMJSON(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts) {
-
-//     otfcc_SplineFontContainer *sfnt;
-//     otfcc_Font                *curFont;
-//     json_value                *root;
-
-//     std::expected<nlohmann::ordered_json, err> res = std::unexpected(err::unknownError);
-
-//     fmem_file fmf(raw_ttfFont);
-
-//     // Read sfnt
-//     {
-//         sfnt = otfcc_readSFNT(fmf.get());
-//         if (! sfnt) {
-//             res = std::unexpected(err::SFNT_cannotReadSFNT);
-//             goto RET;
-//         }
-//         if (0 >= sfnt->count) {
-//             res = std::unexpected(err::SFNT_subfontIndexOutOfRange);
-//             goto RET;
-//         }
-//     }
-
-//     // Build otfcc representation of font
-//     {
-//         otfcc_IFontBuilder *reader = otfcc_newOTFReader();
-//         curFont                    = reader->read(sfnt, 0, opts.operator->());
-//         reader->free(reader);
-//         if (! curFont) {
-//             res = std::unexpected(err::SFNT_fontStructureBrokenOrCorrupted);
-//             goto RET;
-//         }
-//     }
-
-//     // otfcc Consolidate font
-//     otfcc_iFont.consolidate(curFont, opts.operator->());
-
-//     //  otfcc create JSON value representation from otfcc_Font
-//     {
-//         otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
-//         root                          = (json_value *)dumper->serialize(curFont, opts.operator->());
-//         dumper->free(dumper);
-//         if (! root) {
-//             res = std::unexpected(err::SFNT_fontStructureBrokenOrCorrupted);
-//             goto RET;
-//         }
-//     }
-
-//     //  Write serialized JSON data into a buffer
-//     char  *buf;
-//     size_t buflen;
-//     {
-//         json_serialize_opts jsonOptions;
-//         jsonOptions.mode        = json_serialize_mode_packed;
-//         jsonOptions.opts        = 0;
-//         jsonOptions.indent_size = 4;
-
-//         buflen = json_measure_ex(root, jsonOptions);
-//         buf    = (char *)calloc(1, buflen);
-//         json_serialize_ex(buf, root, jsonOptions);
-//     }
-
-//     // Create nlmJson representation
-//     res = nlohmann::ordered_json::parse(std::span<char>(buf, buflen));
-//     free(buf);
-
-// RET:
-//     if (root) { json_builder_free(root); }
-//     if (curFont) { otfcc_iFont.free(curFont); }
-//     if (sfnt) { otfcc_deleteSFNT(sfnt); }
-
-//     return res;
-// };
-
-// inline std::expected<font_raw, err>
-// build_fromNLMJSON(nlohmann::ordered_json const &nlmJson, otfccxx_Options const &opts) {
-//     return {};
-// };
-
 
 } // namespace otfccxx

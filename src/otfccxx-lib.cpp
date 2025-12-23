@@ -1,9 +1,7 @@
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <limits>
-#include <memory>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,12 +9,13 @@
 #include <json-builder.h>
 #include <json.h>
 
-
 #include <hb-set.hh>
 #include <hb-subset.h>
 
 #include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
+
+#include <otfcc/otfcc_api.h>
 
 namespace otfccxx {
 
@@ -45,12 +44,30 @@ struct _hb_subset_input_uptr_deleter {
         if (s) { hb_subset_input_destroy(s); }
     }
 };
+
+struct _json_value_uptr_deleter {
+    void
+    operator()(json_value *j) const noexcept {
+        if (j) { json_builder_free(j); }
+    }
+};
+struct _otfcc_opt_uptr_deleter {
+    void
+    operator()(otfcc_Options *o) const noexcept {
+        if (o) { otfcc_deleteOptions(o); }
+    }
+};
+
+
 } // namespace detail
 
 using hb_face_uptr         = std::unique_ptr<hb_face_t, detail::_hb_face_uptr_deleter>;
 using hb_blob_uptr         = std::unique_ptr<hb_blob_t, detail::_hb_blob_uptr_deleter>;
 using hb_set_uptr          = std::unique_ptr<hb_set_t, detail::_hb_set_uptr_deleter>;
 using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subset_input_uptr_deleter>;
+
+using json_value_uptr = std::unique_ptr<json_value, detail::_json_value_uptr_deleter>;
+using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_deleter>;
 
 struct AccessInfo {
     bool readable;
@@ -117,6 +134,29 @@ write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> byt
     outs.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size_bytes()));
     return outs.good();
 }
+
+class Options::Impl {
+    friend class Modifier;
+
+public:
+    Impl() : _opts(otfcc_newOptions()) {}
+    Impl(uint8_t optLevel) : _opts(otfcc_newOptions()) {
+        otfcc_Options_optimizeTo(_opts.get(), optLevel);
+        _opts->logger = otfcc_newLogger(otfcc_newStdErrTarget());
+        _opts->logger->indent(_opts->logger, "[missing]");
+        _opts->decimal_cmap = true;
+    }
+
+private:
+    otfcc_opt_uptr _opts;
+};
+
+
+Options::Options() noexcept : pimpl(std::make_unique<Impl>()) {}
+Options::Options(uint8_t optLevel) noexcept : pimpl(std::make_unique<Impl>(optLevel)) {}
+
+Options::~Options() = default;
+
 
 class Subsetter::Impl {
     friend class Subsetter;
@@ -420,7 +460,7 @@ class Modifier::Impl {
 public:
     Impl() {}
     Impl(font_raw const &ttf) {}
-    Impl(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts, uint32_t ttcindex = 0) {
+    Impl(std::span<const std::byte> raw_ttfFont, Options const &opts, uint32_t ttcindex = 0) {
         otfccxx::fmem_file memfile(raw_ttfFont);
 
         otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
@@ -429,7 +469,7 @@ public:
 
         // Build font
         otfcc_IFontBuilder *reader = otfcc_newOTFReader();
-        otfcc_Font         *font   = reader->read(sfnt, ttcindex, &opts.get());
+        otfcc_Font         *font   = reader->read(sfnt, ttcindex, opts.pimpl.get()->_opts.get());
         if (! font) { std::exit(1); }
 
         // Free no longer needed stuff
@@ -437,19 +477,17 @@ public:
         if (sfnt) { otfcc_deleteSFNT(sfnt); }
 
         // Consolidate
-        otfcc_iFont.consolidate(font, &opts.get());
+        otfcc_iFont.consolidate(font, opts.pimpl.get()->_opts.get());
 
 
         otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
-        _jsonFont                     = (json_value *)dumper->serialize(font, &opts.get());
+        _jsonFont                     = json_value_uptr((json_value *)dumper->serialize(font, opts.pimpl.get()->_opts.get()));
 
         if (! _jsonFont) { std::exit(1); }
         dumper->free(dumper);
     }
 
-    ~Impl() {
-        if (_jsonFont) { json_builder_free(_jsonFont); }
-    };
+    ~Impl() = default;
 
 private:
     class JSON_Access {
@@ -693,20 +731,20 @@ private:
 
 
     std::expected<font_raw, err_modifier>
-    exportResult(otfccxx_Options const &opts) {
+    exportResult(Options const &opts) {
 
         otfcc_Font         *font;
         otfcc_IFontBuilder *parser = otfcc_newJsonReader();
-        font                       = parser->read(_jsonFont, 0, &opts.get());
+        font                       = parser->read(_jsonFont.get(), 0, opts.pimpl.get()->_opts.get());
 
         parser->free(parser);
         if (! font) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-        otfcc_iFont.consolidate(font, &opts.get());
+        otfcc_iFont.consolidate(font, opts.pimpl.get()->_opts.get());
 
 
         otfcc_IFontSerializer *writer = otfcc_newOTFWriter();
-        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, &opts.get());
+        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, opts.pimpl.get()->_opts.get());
         if (! otf) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
         font_raw res(otf->size);
@@ -843,12 +881,12 @@ private:
 
 
 private:
-    json_value *_jsonFont;
+    json_value_uptr _jsonFont;
 };
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
-Modifier::Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts, uint32_t ttcindex)
+Modifier::Modifier(std::span<const std::byte> raw_ttfFont, Options const &opts, uint32_t ttcindex)
     : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
 
 Modifier::~Modifier() = default;
@@ -875,7 +913,7 @@ Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
 
 // Export
 std::expected<font_raw, err_modifier>
-Modifier::exportResult(otfccxx_Options const &opts) {
+Modifier::exportResult(Options const &opts) {
     if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
     else { return pimpl->exportResult(opts); }
 };
