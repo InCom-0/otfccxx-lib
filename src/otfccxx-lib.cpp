@@ -518,8 +518,8 @@ private:
     };
 
     struct HLPR_glyphByAW {
-        json_int_t origLSB = 0;
-        json_int_t movedBy = 0;
+        json_int_t origLSB  = 0;
+        json_int_t movedByH = 0;
     };
 
     struct _Detail {
@@ -551,7 +551,7 @@ private:
     }
 
     std::expected<size_t, err_modifier>
-    transform_glyphsSize(uint32_t newEmSize) {
+    transform_glyphsSize(uint32_t newEmSize, bool removeTTFhints = true) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
         auto ht_ptr = JSON_Access::get(*_jsonFont, "head");
         if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
@@ -587,8 +587,6 @@ private:
     }
 
 
-    // Must receive refMovesOfOther which specifies how much reference glyphs
-    // have/will be moved horizontally
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
     transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
@@ -657,7 +655,15 @@ private:
                 if (keepSameADW) { moveBy = 0; }
                 else {
                     moveBy = (newWidth - adwObj->u.integer) *
-                             (leftBearing / (leftBearing + (adwObj->u.integer - rightBearing)));
+                             (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
+                }
+
+                for (auto const oneCont : contoursObj->u.array) {
+                    for (auto const oneContPoint : oneCont->u.array) {
+                        auto refXpos        = JSON_Access::get(*oneContPoint, "x");
+                        // Move the countour points by moveBy
+                        refXpos->u.integer += moveBy;
+                    }
                 }
             }
 
@@ -702,20 +708,22 @@ private:
                 if (keepSameADW) { moveBy = 0; }
                 else {
                     moveBy = (newWidth - adwObj->u.integer) *
-                             (leftBearing / (leftBearing + (adwObj->u.integer - rightBearing)));
+                             (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
                 }
 
                 for (size_t i = 0; auto const oneRef : refesObj->u.array) {
                     auto refXpos        = JSON_Access::get(*oneRef, "x");
                     // Move the anchors for references by moveBy but exclude the move already done inside the refed
                     // glyph
-                    refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedBy);
+                    refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedByH);
                     i++;
                 }
 
                 if (cycleChecker.erase(toSolve) != 1uz) { return std::unexpected(err_modifier::unknownError); }
             }
 
+            // Update the actual advance width value in the glyph
+            if (not keepSameADW) { adwObj->u.integer = newWidth; }
 
             // Update res;
             if (auto inserted = res.insert({toSolve, {leftBearing, moveBy}}); inserted.second == false) {
@@ -899,8 +907,8 @@ Modifier::~Modifier() = default;
 
 // Changing dimensions of glyphs
 std::expected<bool, err_modifier>
-Modifier::change_unitsPerEm(uint32_t newEmSize) {
-    auto exp_res = pimpl->transform_glyphsSize(newEmSize);
+Modifier::change_unitsPerEm(uint32_t newEmSize, bool removeTTFhints) {
+    auto exp_res = pimpl->transform_glyphsSize(newEmSize, removeTTFhints);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
@@ -953,11 +961,10 @@ Converter::encode_Woff2(ByteSpan ttf) {
 
 std::expected<Bytes, err_converter>
 Converter::decode_Woff2(ByteSpan ttf) {
-    const size_t final_size =
-        woff2::ComputeWOFF2FinalSize(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size());
+    const size_t final_size = woff2::ComputeWOFF2FinalSize(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size());
     if (final_size == 0) { return std::unexpected(err_converter::woff2_dataInvalid); }
 
-    Bytes output(final_size);
+    Bytes                 output(final_size);
     woff2::WOFF2MemoryOut out(reinterpret_cast<uint8_t *>(output.data()), output.size());
 
     const bool ok = ConvertWOFF2ToTTF(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size(), &out);

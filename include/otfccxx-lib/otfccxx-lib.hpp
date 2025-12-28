@@ -82,6 +82,8 @@ private:
     std::unique_ptr<Impl> pimpl;
 };
 
+// 'Waterfall' subsetter that subsets a collection of fonts in a priority waterfall fashion based on the requested
+// unicode codepoints.
 class Subsetter {
 private:
     class Impl;
@@ -150,7 +152,7 @@ public:
 
     // Changing dimensions of glyphs
     std::expected<bool, err_modifier>
-    change_unitsPerEm(uint32_t newEmSize);
+    change_unitsPerEm(uint32_t newEmSize, bool removeTTFhints = true);
     std::expected<bool, err_modifier>
     change_makeMonospaced(uint32_t targetAdvWidth);
 
@@ -158,6 +160,8 @@ public:
 
 
     // Modifications of other values and properties
+    std::expected<bool, err_modifier>
+    remove_ttfHints();
 
 
     // Export
