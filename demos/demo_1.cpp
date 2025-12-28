@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include <otfccxx-lib/otfccxx-lib.hpp>
+#include <woff2/encode.h>
 
 int
 main(int argc, char *argv[]) {
@@ -11,9 +12,9 @@ main(int argc, char *argv[]) {
     std::vector<uint32_t> keepThese{65, 75, 85, 97};
 
     otfccxx::Subsetter subsetter_1;
-    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./IosevkaNerdFont-Regular.ttf"));
+    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./JetBrainsMonoNerdFont-Regular.ttf"));
 
-    std::filesystem::path outFile = "./subsetted.ttf";
+    std::filesystem::path outFile = "./subsetted_JB.ttf";
     auto                  res     = subsetter_1.execute();
 
     otfccxx::Modifier modifier_1(res->front());

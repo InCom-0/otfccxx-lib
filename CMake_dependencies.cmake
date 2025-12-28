@@ -21,5 +21,6 @@ set(HB_BUILD_UTILS OFF)
 
 set(CPM_USE_LOCAL_PACKAGES OFF)
 CPMAddPackage("gh:InCom-0/harfbuzz#symbolDedup")
+CPMAddPackage("gh:InCom-0/woff2#otfccxx")
 
 set(CPM_USE_LOCAL_PACKAGES ${CPM_USE_LOCAL_PACKAGES_ORIG})

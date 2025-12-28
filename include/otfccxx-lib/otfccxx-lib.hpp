@@ -11,7 +11,13 @@
 
 
 namespace otfccxx {
-using font_raw = std::vector<std::byte>;
+using Bytes    = std::vector<std::byte>;
+using ByteSpan = std::span<const std::byte>;
+
+// Forward declare of all
+class Modifier;
+class Subsetter;
+class Options;
 
 enum class err : size_t {
     unknownError = 1,
@@ -45,10 +51,36 @@ enum class err_modifier : size_t {
     missingGlyphInGlyfTable,
     glyphHasBothCountoursAndReferences,
 };
+enum class err_converter : size_t {
+    unknownError = 1,
+    unexpectedNullptr,
+    woff2_dataInvalid,
+    woff2_decompressionFailed
+};
 
 
 std::expected<bool, std::filesystem::file_type>
-write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> bytes);
+write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
+
+// Simply wraps otfcc_Options
+class Options {
+private:
+    class Impl;
+    friend class Modifier;
+
+public:
+    explicit Options() noexcept;
+    explicit Options(uint8_t optLevel) noexcept;
+
+    Options(const Options &) = delete;
+    Options &
+    operator=(const Options &) = delete;
+
+    ~Options();
+
+private:
+    std::unique_ptr<Impl> pimpl;
+};
 
 class Subsetter {
 private:
@@ -93,9 +125,9 @@ public:
     // 1) execute() - Get 'waterfall of font faces'
     // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector)
     // a unicode points that weren't found in any font
-    std::expected<std::vector<font_raw>, err_subset>
+    std::expected<std::vector<Bytes>, err_subset>
     execute();
-    std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset>
+    std::expected<std::pair<std::vector<Bytes>, std::vector<uint32_t>>, err_subset>
     execute_bestEffort();
 
     bool
@@ -107,37 +139,13 @@ private:
     std::unique_ptr<Impl> pimpl;
 };
 
-
-// Forward declaration to be able to be a friend of 'Options'
-class Modifier;
-
-// Simply wraps otfcc_Options
-class Options {
-private:
-    class Impl;
-    friend class Modifier;
-
-public:
-    explicit Options() noexcept;
-    explicit Options(uint8_t optLevel) noexcept;
-
-    Options(const Options &) = delete;
-    Options &
-    operator=(const Options &) = delete;
-
-    ~Options();
-
-private:
-    std::unique_ptr<Impl> pimpl;
-};
-
 class Modifier {
 private:
     class Impl;
 
 public:
     Modifier();
-    Modifier(std::span<const std::byte> raw_ttfFont, Options const &opts = otfccxx::Options(1), uint32_t ttcindex = 0);
+    Modifier(ByteSpan raw_ttfFont, Options const &opts = otfccxx::Options(1), uint32_t ttcindex = 0);
     ~Modifier();
 
     // Changing dimensions of glyphs
@@ -153,11 +161,24 @@ public:
 
 
     // Export
-    std::expected<font_raw, err_modifier>
+    std::expected<Bytes, err_modifier>
     exportResult(Options const &opts = otfccxx::Options(1));
 
 private:
     std::unique_ptr<Impl> pimpl;
+};
+
+class Converter {
+public:
+    static size_t
+    max_compressed_size(ByteSpan data);
+    static size_t
+    max_compressed_size(ByteSpan data, const std::string &extended_metadata);
+
+    [[nodiscard]] static std::expected<Bytes, err_converter>
+    encode_Woff2(ByteSpan ttf);
+    [[nodiscard]] static std::expected<Bytes, err_converter>
+    decode_Woff2(ByteSpan ttf);
 };
 
 } // namespace otfccxx

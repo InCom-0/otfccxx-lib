@@ -12,6 +12,11 @@
 #include <hb-set.hh>
 #include <hb-subset.h>
 
+#include <woff2/decode.h>
+#include <woff2/encode.h>
+#include <woff2/output.h>
+
+
 #include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
@@ -114,7 +119,7 @@ check_access(const std::filesystem::path &p) {
 }
 
 std::expected<bool, std::filesystem::file_type>
-write_bytesToFile(std::filesystem::path const &p, std::span<const std::byte> bytes) {
+write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes) {
     if (not p.has_filename()) { return std::unexpected(std::filesystem::file_type::not_found); }
     if (p.has_parent_path()) {
         std::error_code ec;
@@ -385,7 +390,7 @@ Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
 }
 
 // Execution
-std::expected<std::vector<font_raw>, err_subset>
+std::expected<std::vector<Bytes>, err_subset>
 Subsetter::execute() {
     if (auto res = execute_bestEffort(); res.has_value()) {
         if (res.value().second.empty()) { return std::move(res.value().first); }
@@ -394,7 +399,7 @@ Subsetter::execute() {
     else { return std::unexpected(res.error()); }
 }
 
-std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset>
+std::expected<std::pair<std::vector<Bytes>, std::vector<uint32_t>>, err_subset>
 Subsetter::execute_bestEffort() {
     std::vector<hb_blob_uptr> res;
 
@@ -436,13 +441,13 @@ RET:
     for (auto const &item : *pimpl->toKeep_unicodeCPs.get()) { resVec.push_back(item); }
 
     return std::make_pair(
-        std::vector<font_raw>(std::from_range, res | std::views::transform([](auto const &item) {
-                                                   unsigned int length;
-                                                   const char  *data = hb_blob_get_data(item.get(), &length);
-                                                   return font_raw(
-                                                       std::from_range,
-                                                       std::span(reinterpret_cast<const std::byte *>(data), length));
-                                               })),
+        std::vector<Bytes>(std::from_range, res | std::views::transform([](auto const &item) {
+                                                unsigned int length;
+                                                const char  *data = hb_blob_get_data(item.get(), &length);
+                                                return Bytes(
+                                                    std::from_range,
+                                                    std::span(reinterpret_cast<const std::byte *>(data), length));
+                                            })),
         std::move(resVec));
 }
 
@@ -460,8 +465,8 @@ class Modifier::Impl {
 
 public:
     Impl() {}
-    Impl(font_raw const &ttf) {}
-    Impl(std::span<const std::byte> raw_ttfFont, Options const &opts, uint32_t ttcindex = 0) {
+    Impl(Bytes const &ttf) {}
+    Impl(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex = 0) {
         otfccxx::fmem_file memfile(raw_ttfFont);
 
         otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
@@ -482,7 +487,7 @@ public:
 
 
         otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
-        _jsonFont                     = json_value_uptr((json_value *)dumper->serialize(font, opts.pimpl.get()->_opts.get()));
+        _jsonFont = json_value_uptr((json_value *)dumper->serialize(font, opts.pimpl.get()->_opts.get()));
 
         if (! _jsonFont) { std::exit(1); }
         dumper->free(dumper);
@@ -731,7 +736,7 @@ private:
     }
 
 
-    std::expected<font_raw, err_modifier>
+    std::expected<Bytes, err_modifier>
     exportResult(Options const &opts) {
 
         otfcc_Font         *font;
@@ -748,7 +753,7 @@ private:
         caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, opts.pimpl.get()->_opts.get());
         if (! otf) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-        font_raw res(otf->size);
+        Bytes res(otf->size);
         std::memcpy(res.data(), otf->data, otf->size);
 
         return res;
@@ -887,7 +892,7 @@ private:
 
 Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
-Modifier::Modifier(std::span<const std::byte> raw_ttfFont, Options const &opts, uint32_t ttcindex)
+Modifier::Modifier(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex)
     : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
 
 Modifier::~Modifier() = default;
@@ -913,13 +918,54 @@ Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
 
 
 // Export
-std::expected<font_raw, err_modifier>
+std::expected<Bytes, err_modifier>
 Modifier::exportResult(Options const &opts) {
     if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
     else { return pimpl->exportResult(opts); }
 };
 
 
-// PRIVATE METHODS
+size_t
+Converter::max_compressed_size(ByteSpan data) {
+    return woff2::MaxWOFF2CompressedSize(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+}
+
+size_t
+Converter::max_compressed_size(ByteSpan data, const std::string &extended_metadata) {
+    return woff2::MaxWOFF2CompressedSize(reinterpret_cast<const uint8_t *>(data.data()), data.size(),
+                                         extended_metadata);
+}
+
+
+std::expected<Bytes, err_converter>
+Converter::encode_Woff2(ByteSpan ttf) {
+    size_t max_size = max_compressed_size(ttf);
+    Bytes  output(max_size);
+
+    size_t actual_size = max_size;
+    bool   ok          = woff2::ConvertTTFToWOFF2(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size(),
+                                                  reinterpret_cast<uint8_t *>(output.data()), &actual_size);
+    if (! ok) { return std::unexpected(err_converter::unknownError); }
+
+    output.resize(actual_size);
+    return output;
+}
+
+std::expected<Bytes, err_converter>
+Converter::decode_Woff2(ByteSpan ttf) {
+    const size_t final_size =
+        woff2::ComputeWOFF2FinalSize(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size());
+    if (final_size == 0) { return std::unexpected(err_converter::woff2_dataInvalid); }
+
+    Bytes output(final_size);
+    woff2::WOFF2MemoryOut out(reinterpret_cast<uint8_t *>(output.data()), output.size());
+
+    const bool ok = ConvertWOFF2ToTTF(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size(), &out);
+    if (! ok) { return std::unexpected(err_converter::woff2_decompressionFailed); }
+
+    output.resize(out.Size());
+    return output;
+}
+
 
 } // namespace otfccxx

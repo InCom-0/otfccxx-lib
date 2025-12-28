@@ -41,7 +41,7 @@ target_compile_features(otfccxx-lib PRIVATE cxx_std_23)
 
 include(CMake_dependencies.cmake) ### Loads and declares the required external libraries using CPM or CMake's FetchContent.
 
-target_link_libraries(otfccxx-lib PRIVATE otfcc-lib::otfcc-lib harfbuzz-subset fmem::fmem)
+target_link_libraries(otfccxx-lib PRIVATE otfcc-lib::otfcc-lib harfbuzz-subset fmem::fmem woff2enc woff2dec)
 
 ### This attempts to compile sample program to find out if we are using libc++(USING_LIBCXX) or libstdc++(USING_LIBSTDCXX)
 # include(cmake/stdlibQuery.cmake)
@@ -50,6 +50,6 @@ target_link_libraries(otfccxx-lib PRIVATE otfcc-lib::otfcc-lib harfbuzz-subset f
 # endif()
 
 
-add_executable(scratch src/main.cpp)
+add_executable(scratch demos/demo_1.cpp)
 target_compile_features(scratch PRIVATE cxx_std_23)
 target_link_libraries(scratch PRIVATE otfccxx-lib)
