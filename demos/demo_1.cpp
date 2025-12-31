@@ -14,7 +14,7 @@ main(int argc, char *argv[]) {
     otfccxx::Subsetter subsetter_1;
     subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./calibri.ttf"));
 
-    std::filesystem::path outFile = "./cali_2.ttf";
+    std::filesystem::path outFile = "./cali_3.ttf";
     auto                  res     = subsetter_1.execute();
 
     otfccxx::Modifier modifier_1(res->front());

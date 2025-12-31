@@ -1,3 +1,4 @@
+#include <concepts>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -187,44 +188,45 @@ remove_objectMemberByName(json_value *obj, std::string_view key) {
 
     return true;
 }
+[[maybe_unused]]
+static std::expected<json_value *, err_modifier>
+get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
+    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    json_value *cur = root;
 
-// static std::expected<json_value *, err_modifier>
-// get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
-//     if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-//     json_value *cur = root;
-//
-//     for (auto &oneSV : toGet) {
-//         cur = get(*cur, oneSV);
-//         if (cur == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-//     }
-//     return cur;
-// }
+    for (auto &oneSV : toGet) {
+        cur = get(*cur, oneSV);
+        if (cur == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    }
+    return cur;
+}
 
-// static std::expected<std::vector<json_value *>, err_modifier>
-// get_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
-//     if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-//     size_t                    curLvl = 0;
-//     std::vector<json_value *> res;
-//
-//     auto const recSolver = [&](this auto const &self, json_value *cur) -> std::optional<err_modifier> {
-//         if (curLvl == toGet.size()) {
-//             res.push_back(cur);
-//             return std::nullopt;
-//         }
-//         for (auto const &oneName : toGet.at(curLvl)) {
-//             auto newJV = get(*cur, oneName);
-//             if (newJV == nullptr) { return err_modifier::missingJSONKey; }
-//
-//             curLvl++;
-//             if (auto res = self(newJV); res.has_value()) { return res; }
-//             curLvl--;
-//         }
-//         return std::nullopt;
-//     };
-//
-//     if (auto res = recSolver(root); res.has_value()) { return std::unexpected(res.value()); }
-//     return res;
-// }
+[[maybe_unused]]
+static std::expected<std::vector<json_value *>, err_modifier>
+get_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
+    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    size_t                    curLvl = 0;
+    std::vector<json_value *> res;
+
+    auto const recSolver = [&](this auto const &self, json_value *cur) -> std::optional<err_modifier> {
+        if (curLvl == toGet.size()) {
+            res.push_back(cur);
+            return std::nullopt;
+        }
+        for (auto const &oneName : toGet.at(curLvl)) {
+            auto newJV = get(*cur, oneName);
+            if (newJV == nullptr) { return err_modifier::missingJSONKey; }
+
+            curLvl++;
+            if (auto res = self(newJV); res.has_value()) { return res; }
+            curLvl--;
+        }
+        return std::nullopt;
+    };
+
+    if (auto res = recSolver(root); res.has_value()) { return std::unexpected(res.value()); }
+    return res;
+}
 
 static std::expected<std::vector<std::optional<json_value *>>, err_modifier>
 getMaybe_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
@@ -768,8 +770,10 @@ private:
         return res;
     }
 
+    template <typename P>
+    requires std::predicate<P, _json_value>
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
-    transform_allGlyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
+    transform_allGlyphsByAW(json_int_t const newWidth, P const pred_keepSameADW) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
         std::unordered_map<std::string, HLPR_glyphByAW> res{};
