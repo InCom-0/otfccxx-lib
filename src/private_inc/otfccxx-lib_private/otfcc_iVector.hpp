@@ -5,9 +5,7 @@
 #include <type_traits>
 
 
-#include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
-
 #include <otfccxx-lib_private/otfcc_iElement.hpp>
 
 #include <otfcc/otfcc_api.h>
@@ -17,7 +15,6 @@ namespace otfccxx {
 
 namespace wrappers {
 namespace detail {
-
 // -------------------------------------------------
 // C++23 Machinery
 // -------------------------------------------------
@@ -56,9 +53,15 @@ template <>
 struct _VI_wrap<glyf_Contour> {
     static constexpr auto *interfaceObjPointer = &glyf_iContour;
 };
+template <>
+struct _VI_wrap<const glyf_Contour> {
+    static constexpr auto *interfaceObjPointer = &glyf_iContour;
+};
 
 template <typename T>
-concept has_VI_wrap = requires { typename trait_registry::_VI_wrap<T>; };
+concept has_VI_wrap = requires {
+    { trait_registry::_VI_wrap<T>::interfaceObjPointer };
+};
 
 } // namespace trait_registry
 
@@ -78,7 +81,7 @@ template <typename VEC, typename T>
 concept has_caryllVectorStorage = requires(VEC v) {
     { v.length } -> std::convertible_to<std::size_t>;
     { v.capacity } -> std::convertible_to<std::size_t>;
-    { v.items } -> std::same_as<T *>;
+    { v.items } -> std::same_as<std::add_lvalue_reference_t<T *>>;
 };
 
 template <typename VEC, typename T, typename Interface>
@@ -116,19 +119,39 @@ concept is_sortComparator = requires(CMP cmp, T a, T b) {
 
 template <has_caryllVectorTraits Traits>
 class caryllVector_view {
+private:
+    struct _typeHLPR {
+        friend class caryllVector_view;
+
+    private:
+        static consteval auto
+        select_vr_type() {
+            if constexpr (trait_registry::has_VI_wrap<value_type>) {
+                return std::type_identity<caryllVector_view<
+                    traits_carrylVector<value_type, std::remove_pointer_t<decltype(value_type::items)>>>>{};
+            }
+            else { return std::type_identity<value_type &>{}; }
+        }
+        static consteval auto
+        select_iter_type() {
+            if constexpr (trait_registry::has_VI_wrap<value_type>) {
+                return std::type_identity<caryllVector_view<
+                    traits_carrylVector<value_type, std::remove_pointer_t<decltype(value_type::items)>>>>{};
+            }
+            else { return std::type_identity<value_type *>{}; }
+        }
+
+        using value_reference = typename decltype(select_vr_type())::type;
+        using iterator        = typename decltype(select_vr_type())::type;
+    };
+
 public:
     using vector_type = typename Traits::vector_type;
     using value_type  = typename Traits::value_type;
     using size_type   = std::size_t;
 
-    using reference = std::conditional_t<
-        trait_registry::has_VI_wrap<value_type>,
-        caryllVector_view<traits_carrylVector<value_type, std::remove_pointer_t<decltype(value_type::items)>>>,
-        value_type &>;
-    using const_reference = std::conditional_t<
-        trait_registry::has_VI_wrap<value_type>,
-        caryllVector_view<traits_carrylVector<const value_type, std::remove_pointer_t<decltype(value_type::items)>>>,
-        const value_type &>;
+    using reference       = _typeHLPR::value_reference;
+    using const_reference = const reference;
 
     using pointer       = value_type *;
     using const_pointer = const value_type *;

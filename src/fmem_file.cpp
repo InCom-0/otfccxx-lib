@@ -1,7 +1,7 @@
-#include <otfccxx-lib/fmem_file.hpp>
-
 #include <cstring>
 #include <stdexcept>
+
+#include <otfccxx-lib_private/fmem_file.hpp>
 
 namespace otfccxx {
 fmem_file::fmem_file(std::span<const std::byte> data) : mem_(new fmem{}), file_(nullptr) {

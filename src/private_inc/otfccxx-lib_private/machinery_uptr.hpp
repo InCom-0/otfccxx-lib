@@ -49,6 +49,13 @@ struct _otfcc_opt_uptr_deleter {
         if (o) { otfcc_deleteOptions(o); }
     }
 };
+struct _otfcc_Font_uptr_deleter {
+    void
+    operator()(otfcc_Font *f) const noexcept {
+        if (f) { otfcc_iFont.free(f); }
+    }
+};
+
 
 struct Default_FNs {
     static constexpr auto ret_onObjRemoval = [](const json_object_entry &json_oe) -> std::string {
@@ -65,4 +72,5 @@ using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subs
 
 using json_value_uptr = std::unique_ptr<json_value, detail::_json_value_uptr_deleter>;
 using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_deleter>;
+using otfcc_Font_uptr = std::unique_ptr<otfcc_Font, detail::_otfcc_Font_uptr_deleter>;
 } // namespace otfccxx

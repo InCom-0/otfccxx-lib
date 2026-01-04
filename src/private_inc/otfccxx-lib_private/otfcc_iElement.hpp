@@ -4,7 +4,6 @@
 #include <concepts>
 
 
-#include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
 #include <otfcc/otfcc_api.h>

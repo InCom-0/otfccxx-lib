@@ -16,6 +16,7 @@ using ByteSpan = std::span<const std::byte>;
 
 // Forward declare of all
 class Modifier;
+class Modifier_V2;
 class Subsetter;
 class Options;
 
@@ -69,6 +70,7 @@ class Options {
 private:
     class Impl;
     friend class Modifier;
+    friend class Modifier_V2;
 
 public:
     explicit Options() noexcept;

@@ -1,24 +1,26 @@
 #include <concepts>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <fstream>
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <stdint.h>
 #include <unordered_map>
 #include <unordered_set>
-
-
 #include <utility>
+
 #include <woff2/decode.h>
 #include <woff2/encode.h>
 #include <woff2/output.h>
 
-#include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
+
+#include <otfccxx-lib_private/fmem_file.hpp>
+#include <otfccxx-lib_private/json_ext.hpp>
 #include <otfccxx-lib_private/otfcc_iVector.hpp>
 
-#include <otfccxx-lib_private/json_ext.hpp>
 
 namespace otfccxx {
 using namespace std::literals;
@@ -97,6 +99,7 @@ write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes) {
 
 class Options::Impl {
     friend class Modifier;
+    friend class Modifier_V2;
 
 public:
     Impl() : _opts(otfcc_newOptions()) {}
@@ -902,6 +905,401 @@ private:
 
 private:
     json_value_uptr _jsonFont;
+};
+
+class Modifier_V2::Impl {
+    friend class Modifier;
+
+public:
+    Impl() = delete;
+    // Impl(Bytes const &ttf) {}
+    Impl(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex) {
+        otfccxx::fmem_file memfile(raw_ttfFont);
+
+        otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
+        if (! sfnt || sfnt->count == 0) { std::exit(1); }
+        if (ttcindex >= sfnt->count) { std::exit(1); }
+
+        // Build font
+        otfcc_IFontBuilder *reader = otfcc_newOTFReader();
+        _font                      = otfcc_Font_uptr(reader->read(sfnt, ttcindex, opts.pimpl.get()->_opts.get()));
+        if (! _font) { std::exit(1); }
+
+        // Free no longer needed stuff
+        reader->free(reader);
+        if (sfnt) { otfcc_deleteSFNT(sfnt); }
+
+        // Consolidate
+        otfcc_iFont.consolidate(_font.get(), opts.pimpl.get()->_opts.get());
+    }
+
+    ~Impl() = default;
+
+private:
+    struct HLPR_glyphByAW {
+        json_int_t origLSB  = 0;
+        json_int_t movedByH = 0;
+    };
+
+    struct _Detail {
+        static constexpr auto default_ksADW = [](const _json_value &glyphObj) -> bool {
+            auto adwObj = json_ext::get(glyphObj, "advanceWidth"sv);
+            if (adwObj->u.integer == 0) { return true; }
+            return false;
+        };
+    };
+
+
+    // Glyph metric modification
+    static std::expected<bool, err_modifier>
+    transform_glyphSize(glyf_GlyphPtr out_glyph, double const a, double const b, double const c, double const d,
+                        double const dx, double const dy) {
+        auto const adw = [&]() -> std::expected<bool, err_modifier> { return _pureScale_ADW(out_glyph, a); };
+        auto const adh = [&](bool const) -> std::expected<bool, err_modifier> { return _pureScale_ADH(out_glyph, d); };
+        auto const vertO = [&](bool const) -> std::expected<bool, err_modifier> {
+            return _pureScale_VertO(out_glyph, d);
+        };
+        auto const cps = [&](bool const) -> std::expected<bool, err_modifier> {
+            return _pureAdjust_CPs(out_glyph, a, b, c, d, dx, dy);
+        };
+        auto const refAnch = [&](bool const) -> std::expected<bool, err_modifier> {
+            return _pureAdjust_RefAnchors(out_glyph, a, b, c, d, dx, dy);
+        };
+
+        return adw().and_then(adh).and_then(vertO).and_then(cps).and_then(refAnch);
+    }
+
+    std::expected<size_t, err_modifier>
+    transform_allGlyphsSize(uint32_t newEmSize) {
+        if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        auto ht_ptr = json_ext::get(*_font, "head"sv);
+        if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (ht_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+        auto upem = json_ext::get(*ht_ptr, "unitsPerEm"sv);
+        if (upem == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (upem->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+        double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0, d = a, dx = 0, dy = 0;
+        upem->u.integer = newEmSize;
+
+        auto gt_ptr = json_ext::get(*_font, "glyf"sv);
+        if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+        auto const &glyfs = *gt_ptr;
+
+        size_t res = 0uz;
+        for (auto const &one_oe_glyph : glyfs.u.object) {
+            if (one_oe_glyph.value == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+            if (one_oe_glyph.value->type != json_type::json_object) {
+                return std::unexpected(err_modifier::unexpectedJSONValueType);
+            }
+
+            if (auto oneTransformRes = transform_glyphSize(*one_oe_glyph.value, a, b, c, d, dx, dy);
+                not oneTransformRes.has_value()) {
+                return std::unexpected(oneTransformRes.error());
+            }
+            else { res += oneTransformRes.value(); }
+        }
+
+        if (auto res = _pureScale_AscDescLG(a); not res.has_value()) { return std::unexpected(res.error()); }
+        return res;
+    }
+
+    template <typename P>
+    requires std::predicate<P, const _json_value &>
+    std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
+    transform_allGlyphsByAW(json_int_t const newWidth, P const pred_keepSameADW) {
+        if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        std::unordered_map<std::string, HLPR_glyphByAW> res{};
+        std::unordered_set<std::string>                 cycleChecker{};
+
+        auto gt_ptr = json_ext::get(*_font, "glyf"sv);
+        if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+        auto const &glyfs = *gt_ptr;
+
+        std::unordered_map<std::string, struct _json_value *> mapOfRefs;
+        for (auto const &glyf : glyfs.u.object) {
+            mapOfRefs.insert({std::string(glyf.name, glyf.name_length), glyf.value});
+        }
+
+        auto recSolver = [&](this auto const   &self,
+                             std::string const &toSolve) -> std::expected<HLPR_glyphByAW, err_modifier> {
+            if (cycleChecker.contains(toSolve)) { return std::unexpected(err_modifier::cyclicGlyfReferencesFound); }
+            if (auto found = res.find(toSolve); found != res.end()) { return found->second; }
+
+            // Get the object we are supposed to be solving
+            auto ite = mapOfRefs.find(toSolve);
+            if (ite == mapOfRefs.end()) { return std::unexpected(err_modifier::missingGlyphInGlyfTable); }
+            auto solveObj = ite->second;
+            if (solveObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+            // Get advanceWidth (that must be there)
+            auto adwObj = json_ext::get(*solveObj, "advanceWidth"sv);
+            if (adwObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+            if (adwObj->type != json_type::json_integer) {
+                return std::unexpected(err_modifier::unexpectedJSONValueType);
+            }
+            bool keepSameADW = pred_keepSameADW(*solveObj);
+
+            // Prep common fields
+            json_int_t leftBearing  = std::numeric_limits<json_int_t>::max();
+            json_int_t rightBearing = std::numeric_limits<json_int_t>::min();
+            json_int_t moveBy       = 0;
+
+            auto const compute_moveBy = [&]() -> json_int_t {
+                double ratio =
+                    (leftBearing - (adwObj->u.integer / 2.0)) / (rightBearing - ((adwObj->u.integer | 1) / 2.0));
+                ratio += (ratio == 1.0) * std::numeric_limits<double>::min();
+
+                double const LN = leftBearing - (newWidth / 2.0);
+                double const RN = rightBearing - (newWidth / 2.0);
+
+                return (((RN * ratio) - LN) / (1.0 - ratio));
+            };
+
+            // Get the contours (if N/A then skip)
+            auto contoursObj = json_ext::get(*solveObj, "contours"sv);
+            if (contoursObj != nullptr) {
+                if (contoursObj->type != json_type::json_array) {
+                    return std::unexpected(err_modifier::unexpectedJSONValueType);
+                }
+                for (auto countr : contoursObj->u.array) {
+                    if (countr->type != json_type::json_array) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+                    for (auto cp : countr->u.array) {
+                        if (cp->type != json_type::json_object) {
+                            return std::unexpected(err_modifier::unexpectedJSONValueType);
+                        }
+                        auto cp_xPos = json_ext::get(*cp, "x"sv);
+                        if (cp_xPos->type != json_type::json_integer) {
+                            return std::unexpected(err_modifier::unexpectedJSONValueType);
+                        }
+                        // Update left and right bearings
+                        leftBearing  = std::min(leftBearing, cp_xPos->u.integer);
+                        rightBearing = std::max(rightBearing, cp_xPos->u.integer);
+                    }
+                }
+
+                if (keepSameADW) { moveBy = 0; }
+                else {
+                    moveBy = compute_moveBy();
+
+                    // Old and impefect
+                    // moveBy = (newWidth - adwObj->u.integer) *
+                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
+                }
+
+                for (auto const oneCont : contoursObj->u.array) {
+                    for (auto const oneContPoint : oneCont->u.array) {
+                        auto refXpos        = json_ext::get(*oneContPoint, "x"sv);
+                        // Move the countour points by moveBy
+                        refXpos->u.integer += moveBy;
+                    }
+                }
+            }
+
+            // Get the references (if N/A then skip)
+            auto refesObj = json_ext::get(*solveObj, "references"sv);
+            if (refesObj != nullptr) {
+                if (contoursObj != nullptr) {
+                    { return std::unexpected(err_modifier::glyphHasBothCountoursAndReferences); }
+                }
+                if (refesObj->type != json_type::json_array) {
+                    return std::unexpected(err_modifier::unexpectedJSONValueType);
+                }
+
+                cycleChecker.insert(toSolve);
+                std::vector<HLPR_glyphByAW> glyphHLPRs;
+
+                for (auto const oneRef : refesObj->u.array) {
+                    if (oneRef->type != json_type::json_object) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+
+                    auto refName = json_ext::get(*oneRef, "glyph"sv);
+                    if (refName == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+                    if (refName->type != json_type::json_string) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+                    auto refXpos = json_ext::get(*oneRef, "x"sv);
+                    if (refXpos == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+                    if (refXpos->type != json_type::json_integer) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+
+                    // Recursive call
+                    auto refGlyphHLPR = self(std::string(refName->u.string.ptr, refName->u.string.length));
+                    if (not refGlyphHLPR.has_value()) { return std::unexpected(refGlyphHLPR.error()); }
+
+                    glyphHLPRs.push_back(refGlyphHLPR.value());
+                    leftBearing  = std::min(leftBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
+                    rightBearing = std::max(rightBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
+                }
+
+                if (keepSameADW) { moveBy = 0; }
+                else {
+                    moveBy = compute_moveBy();
+
+                    // Old and impefect
+                    // moveBy = (newWidth - adwObj->u.integer) *
+                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
+                }
+
+                for (size_t i = 0; auto const oneRef : refesObj->u.array) {
+                    auto refXpos        = json_ext::get(*oneRef, "x"sv);
+                    // Move the anchors for references by moveBy but exclude the move already done inside the refed
+                    // glyph
+                    refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedByH);
+                    i++;
+                }
+
+                if (cycleChecker.erase(toSolve) != 1uz) { return std::unexpected(err_modifier::unknownError); }
+            }
+
+            // Update the actual advance width value in the glyph
+            if (not keepSameADW) { adwObj->u.integer = newWidth; }
+
+            // Update res;
+            if (auto inserted = res.insert({toSolve, {leftBearing, moveBy}}); inserted.second == false) {
+                return std::unexpected(err_modifier::unknownError);
+            }
+            else { return inserted.first->second; }
+            std::unreachable();
+        };
+
+        // EXECUTING SOLVER
+        for (auto onePair = mapOfRefs.begin(); onePair != mapOfRefs.end(); ++onePair) {
+            // Exec for one glyph name
+            auto solveRes = recSolver(onePair->first);
+            if (not solveRes.has_value()) { return std::unexpected(solveRes.error()); }
+        }
+
+        return res;
+    }
+
+    // Other modifications
+    std::expected<bool, err_modifier>
+    remove_tableByName(std::string_view sv) {
+        return json_ext::remove_objectMemberByName(_font.get(), sv);
+    }
+
+
+    // Export
+    std::expected<Bytes, err_modifier>
+    exportResult(Options const &opts) {
+
+        // 'Finalize' font for export. IE. Do the things that the underlying otfcc library doesn't do
+        auto preExp_res = _preExport_finalize();
+        if (not preExp_res.has_value()) { return std::unexpected(preExp_res.error()); }
+
+        otfcc_Font         *font;
+        otfcc_IFontBuilder *parser = otfcc_newJsonReader();
+        font                       = parser->read(_font.get(), 0, opts.pimpl.get()->_opts.get());
+
+        parser->free(parser);
+        if (! font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        otfcc_iFont.consolidate(font, opts.pimpl.get()->_opts.get());
+
+
+        otfcc_IFontSerializer *writer = otfcc_newOTFWriter();
+        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, opts.pimpl.get()->_opts.get());
+        if (! otf) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        Bytes res(otf->size);
+        std::memcpy(res.data(), otf->data, otf->size);
+
+        return res;
+    }
+
+
+    // 'Doubly' private not really for use by any other class
+    static std::expected<bool, err_modifier>
+    _pureScale_ADW(glyf_GlyphPtr out_glyph, double const a) {
+        if (out_glyph == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        iVQ.inplaceScale(&out_glyph->advanceWidth, a);
+        return true;
+    }
+    static std::expected<bool, err_modifier>
+    _pureScale_ADH(glyf_GlyphPtr out_glyph, double const d) {
+        if (out_glyph == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        iVQ.inplaceScale(&out_glyph->advanceHeight, d);
+        return true;
+    }
+    static std::expected<bool, err_modifier>
+    _pureScale_VertO(glyf_GlyphPtr out_glyph, double const d) {
+        if (out_glyph == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        iVQ.inplaceScale(&out_glyph->verticalOrigin, d);
+        return true;
+    }
+    static std::expected<bool, err_modifier>
+    _pureAdjust_CPs(glyf_GlyphPtr out_glyph, double const a, double const b, double const c, double const d,
+                    double const dx, double const dy) {
+        auto contours = wrappers::CV_wrapper<glyf_ContourList, glyf_Contour>(out_glyph->contours);
+
+        for (auto oneContr : contours | std::views::transform([](auto &&item) {
+                                 return wrappers::CV_wrapper<glyf_Contour, glyf_Point>(item);
+                             })) {
+            for (auto &contPoint : oneContr) {
+                double const origX = contPoint.x.kernel;
+                double const origY = contPoint.y.kernel;
+                contPoint.x.kernel = (a * origX + b * origY + dx);
+                contPoint.y.kernel = (c * origX + d * origY + dy);
+            }
+        }
+        return true;
+    }
+    static std::expected<bool, err_modifier>
+    _pureAdjust_RefAnchors(glyf_GlyphPtr out_glyph, double const a, double const b, double const c, double const d,
+                           double const dx, double const dy) {
+
+        auto referencedGlyphs =
+            wrappers::CV_wrapper<glyf_ReferenceList, glyf_ComponentReference>(out_glyph->references);
+
+        for (auto &oneRef : referencedGlyphs) {
+            double const origX = oneRef.x.kernel;
+            double const origY = oneRef.y.kernel;
+            oneRef.x.kernel    = (a * origX + b * origY + dx);
+            oneRef.y.kernel    = (c * origX + d * origY + dy);
+        }
+        return true;
+    }
+
+    std::expected<bool, err_modifier>
+    _pureScale_AscDescLG(double const multiplier) {
+
+        if (not _font->hhea) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->OS_2) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        auto adjustOne_v2 = [&](auto &out_toAdjust) -> void { out_toAdjust *= multiplier; };
+
+        adjustOne_v2(_font->hhea->ascender);
+        adjustOne_v2(_font->hhea->descender);
+        adjustOne_v2(_font->hhea->lineGap);
+
+        adjustOne_v2(_font->OS_2->sTypoAscender);
+        adjustOne_v2(_font->OS_2->sTypoDescender);
+        adjustOne_v2(_font->OS_2->sTypoLineGap);
+        adjustOne_v2(_font->OS_2->usWinAscent);
+        adjustOne_v2(_font->OS_2->usWinDescent);
+
+        return true;
+    }
+
+
+    // MANDATORY TO IMPLEMENT BEFORE RELEASE
+    std::expected<size_t, err_modifier>
+    _preExport_finalize() {
+        return 0uz;
+    }
+
+
+private:
+    otfcc_Font_uptr _font;
 };
 
 
