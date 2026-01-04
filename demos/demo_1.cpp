@@ -12,7 +12,7 @@ main(int argc, char *argv[]) {
     std::vector<uint32_t> keepThese{65, 75, 85, 97, 113, 117, 99, 105, 107, 84, 102, 108};
 
     otfccxx::Subsetter subsetter_1;
-    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./times.ttf"));
+    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./JetBrainsMonoNerdFont-Regular.ttf"));
     auto res = subsetter_1.execute();
 
 
@@ -26,7 +26,7 @@ main(int argc, char *argv[]) {
     // auto res3 = otfccxx::Converter::encode_Woff2(res2.value());
     // if (not res3.has_value()) { std::exit(1); }
 
-    std::filesystem::path outFile = "./time_2.ttf";
+    std::filesystem::path outFile = "./jb_1.ttf";
     std::ofstream         out(outFile, std::ios::binary);
 
     if (not otfccxx::write_bytesToFile(outFile, res2.value()).has_value()) { std::exit(1); }

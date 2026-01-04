@@ -20,7 +20,7 @@
 #include <woff2/encode.h>
 #include <woff2/output.h>
 
-
+#include <private/otfcc_interface.hpp>
 #include <otfccxx-lib/fmem_file.hpp>
 #include <otfccxx-lib/otfccxx-lib.hpp>
 
@@ -86,8 +86,7 @@ using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_d
 
 namespace json_ext {
 
-
-static struct _json_value *
+[[maybe_unused]] static struct _json_value *
 get(json_value const &rf, std::string_view key) {
     if (rf.type == json_object) {
         for (unsigned int i = 0; i < rf.u.object.length; ++i) {
@@ -99,21 +98,21 @@ get(json_value const &rf, std::string_view key) {
     return nullptr;
 }
 
-// static struct _json_value *
-// get(json_value const &rf, const char *key) {
-//     if (rf.type == json_object) {
-//         for (unsigned int i = 0; i < rf.u.object.length; ++i) {
-//             if (! strcmp(rf.u.object.values[i].name, key)) { return rf.u.object.values[i].value; }
-//         }
-//     }
-//     return nullptr;
-// }
+[[maybe_unused]] static struct _json_value *
+get(json_value const &rf, const char *key) {
+    if (rf.type == json_object) {
+        for (unsigned int i = 0; i < rf.u.object.length; ++i) {
+            if (! strcmp(rf.u.object.values[i].name, key)) { return rf.u.object.values[i].value; }
+        }
+    }
+    return nullptr;
+}
 
-// static struct _json_value *
-// get(json_value const &rf, int index) {
-//     if (rf.type != json_array || index < 0 || ((unsigned int)index) >= rf.u.array.length) { return nullptr; }
-//     return rf.u.array.values[index];
-// }
+[[maybe_unused]] static struct _json_value *
+get(json_value const &rf, int index) {
+    if (rf.type != json_array || index < 0 || ((unsigned int)index) >= rf.u.array.length) { return nullptr; }
+    return rf.u.array.values[index];
+}
 
 // Helper to free a json_value and its children (simple recursive free)
 static void
@@ -159,7 +158,7 @@ free_jsonValue(json_value *val) {
 
 // Remove a named member from a JSON object.
 // Returns true if something was removed.
-static std::expected<bool, err_modifier>
+[[maybe_unused]] static std::expected<bool, err_modifier>
 remove_objectMemberByName(json_value *obj, std::string_view key) {
     if (! obj) { return false; }
     if (obj->type != json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
@@ -227,9 +226,13 @@ remove_objectMembers(json_value *obj, P const pred) {
     return removed;
 }
 
+// Remove, but before removal execute EXTR_FN on the element being removed, return the result in a vector of return
+// types of EXTR_FN. (note that the element is deleted, so the EXTR_FN must not return a reference to some of its
+// content)
 template <typename P, typename EXTR_FN>
-requires std::predicate<P, const json_object_entry &> && std::invocable<EXTR_FN, const json_object_entry &>
-static auto
+requires std::predicate<P, const json_object_entry &> && std::invocable<EXTR_FN, const json_object_entry &> &&
+         (! std::same_as<std::invoke_result_t<EXTR_FN, const json_object_entry &>, void>)
+[[maybe_unused]] static auto
 remove_objectMembers(json_value *obj, P const pred, EXTR_FN const extr_fn)
     -> std::expected<std::vector<std::invoke_result_t<EXTR_FN, const json_object_entry &>>, err_modifier> {
 
@@ -783,6 +786,8 @@ public:
 
         otfcc_IFontSerializer *dumper = otfcc_newJsonWriter();
         _jsonFont = json_value_uptr((json_value *)dumper->serialize(font, opts.pimpl.get()->_opts.get()));
+
+        // Need to free *font as we haven't dont
 
         if (! _jsonFont) { std::exit(1); }
         dumper->free(dumper);
