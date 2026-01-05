@@ -1,12 +1,13 @@
 #include <concepts>
 #include <cstdlib>
 #include <expected>
+#include <fstream>
 #include <limits>
 #include <ranges>
-#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
 
 #include <woff2/decode.h>
 #include <woff2/encode.h>
@@ -16,6 +17,7 @@
 
 #include <otfccxx-lib_private/fmem_file.hpp>
 #include <otfccxx-lib_private/json_ext.hpp>
+#include <otfccxx-lib_private/otfcc_enum.hpp>
 #include <otfccxx-lib_private/otfcc_iVector.hpp>
 
 
@@ -1197,6 +1199,32 @@ private:
         return true;
     }
 
+    std::expected<bool, err_modifier>
+    remove_ttfHints_all() {
+        if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        auto glyfsVec = wrappers::CV_wrapper<table_glyf, glyf_GlyphPtr>(*_font->glyf);
+
+        for (auto oneGlyph : glyfsVec) {
+            if (not oneGlyph) { return std::unexpected(err_modifier::unexpectedNullptr); }
+            oneGlyph->instructionsLength = 0;
+
+            // Yuck
+            if (oneGlyph->instructions != nullptr) {
+                if (oneGlyph->instructions != NULL) {
+                    free(oneGlyph->instructions);
+                    oneGlyph->instructions = NULL;
+                }
+            }
+        }
+
+        std::expected<bool, err_modifier> res;
+        res = remove_tableByTag(std::to_underlying(otfcc_glyfTable_nameMapping::fpgm));
+        res = remove_tableByTag(std::to_underlying(otfcc_glyfTable_nameMapping::prep));
+        res = remove_tableByTag(std::to_underlying(otfcc_glyfTable_nameMapping::cvt));
+        res = remove_tableByTag(std::to_underlying(otfcc_glyfTable_nameMapping::gasp));
+        return true;
+    }
+
 
     // Export
     std::expected<Bytes, err_modifier>
@@ -1206,18 +1234,12 @@ private:
         auto preExp_res = _preExport_finalize();
         if (not preExp_res.has_value()) { return std::unexpected(preExp_res.error()); }
 
-        otfcc_Font         *font;
-        otfcc_IFontBuilder *parser = otfcc_newJsonReader();
-        font                       = parser->read(_font.get(), 0, opts.pimpl.get()->_opts.get());
+        if (! _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-        parser->free(parser);
-        if (! font) { return std::unexpected(err_modifier::unexpectedNullptr); }
-
-        otfcc_iFont.consolidate(font, opts.pimpl.get()->_opts.get());
-
+        otfcc_iFont.consolidate(_font.get(), opts.pimpl.get()->_opts.get());
 
         otfcc_IFontSerializer *writer = otfcc_newOTFWriter();
-        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(font, opts.pimpl.get()->_opts.get());
+        caryll_Buffer         *otf    = (caryll_Buffer *)writer->serialize(_font.get(), opts.pimpl.get()->_opts.get());
         if (! otf) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
         Bytes res(otf->size);
@@ -1350,8 +1372,8 @@ Modifier_V2::change_makeMonospaced_byEmRatio(double const emRatio) {
 
 // THIS FUNCTION IS FAKE
 std::expected<bool, err_modifier>
-Modifier_V2::__remove_ttfHints() {
-    return false;
+Modifier_V2::remove_ttfHints() {
+    return pimpl->remove_ttfHints_all();
 }
 
 // Export

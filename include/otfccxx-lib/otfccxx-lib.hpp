@@ -207,7 +207,7 @@ public:
 
     // Modifications of other values and properties
     std::expected<bool, err_modifier>
-    __remove_ttfHints();
+    remove_ttfHints();
 
 
     // Export
