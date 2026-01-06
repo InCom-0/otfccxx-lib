@@ -11,15 +11,25 @@
 
 
 namespace otfccxx {
-using Bytes    = std::vector<std::byte>;
-using ByteSpan = std::span<const std::byte>;
 
-// Forward declare of all
+// #####################################################################
+// ### Forward declarations ###
+// #####################################################################
 class Modifier;
-class Modifier_V2;
 class Subsetter;
 class Options;
 
+
+// #####################################################################
+// ### Type aliases ###
+// #####################################################################
+using Bytes    = std::vector<std::byte>;
+using ByteSpan = std::span<const std::byte>;
+
+
+// #####################################################################
+// ### Public enums ###
+// #####################################################################
 enum class err : size_t {
     unknownError = 1,
     unexpectedNullptr,
@@ -63,17 +73,17 @@ enum class err_converter : size_t {
     woff2_decompressionFailed
 };
 
-
 std::expected<bool, std::filesystem::file_type>
 write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
+
+
+// #####################################################################
+// ### Classes forming the public interface ###
+// #####################################################################
 
 // Simply wraps otfcc_Options
 class Options {
 private:
-    class Impl;
-    friend class Modifier;
-    friend class Modifier_V2;
-
 public:
     explicit Options() noexcept;
     explicit Options(uint8_t const optLevel, bool const removeTTFhints = true) noexcept;
@@ -85,15 +95,15 @@ public:
     ~Options();
 
 private:
+    friend class Modifier;
+
+    class Impl;
     std::unique_ptr<Impl> pimpl;
 };
 
 // 'Waterfall' subsetter that subsets a collection of fonts in a priority waterfall fashion based on the requested
 // unicode codepoints. Has 'builder pattern' - like interface.
 class Subsetter {
-private:
-    class Impl;
-
 public:
     Subsetter();                      // defined in the implementation file
 
@@ -132,7 +142,7 @@ public:
 
     // 1) execute() - Get 'waterfall of font faces'
     // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector)
-    // a unicode points that weren't found in any font
+    // unicode points that weren't found in any font
     std::expected<std::vector<Bytes>, err_subset>
     execute();
     std::expected<std::pair<std::vector<Bytes>, std::vector<uint32_t>>, err_subset>
@@ -144,6 +154,7 @@ public:
     get_error();
 
 private:
+    class Impl;
     std::unique_ptr<Impl> pimpl;
 };
 
@@ -151,46 +162,10 @@ private:
 // Provides high-level modification capability for TTF fonts. The functionality is very limited in scope.
 // TTF hints are always removed from the font
 class Modifier {
-private:
-    class Impl;
-
 public:
     Modifier() = delete;
     Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
     ~Modifier();
-
-    // Changing dimensions of glyphs
-    std::expected<bool, err_modifier>
-    change_unitsPerEm(uint32_t newEmSize);
-    std::expected<bool, err_modifier>
-    change_makeMonospaced(uint32_t const targetAdvWidth);
-    std::expected<bool, err_modifier>
-    change_makeMonospaced_byEmRatio(double const emRatio);
-
-    // Filtering of font content (ie. deleting parts of the font)
-
-
-    // Modifications of other values and properties
-    std::expected<bool, err_modifier>
-    __remove_ttfHints();
-
-
-    // Export
-    std::expected<Bytes, err_modifier>
-    exportResult(Options const &opts = otfccxx::Options(1));
-
-private:
-    std::unique_ptr<Impl> pimpl;
-};
-
-class Modifier_V2 {
-private:
-    class Impl;
-
-public:
-    Modifier_V2() = delete;
-    Modifier_V2(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
-    ~Modifier_V2();
 
     // Changing dimensions of glyphs
     std::expected<bool, err_modifier>
@@ -215,8 +190,10 @@ public:
     exportResult(Options const &opts = otfccxx::Options(1));
 
 private:
+    class Impl;
     std::unique_ptr<Impl> pimpl;
 };
+
 
 class Converter {
 public:
