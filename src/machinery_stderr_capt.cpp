@@ -16,6 +16,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef _MSC_VER
+#define fileno _fileno
+#endif
+
 
 #include <otfccxx-lib_private/machinery_stderr_capt.hpp>
 
@@ -30,10 +34,10 @@ _stderrCapture::_stderrCapture() {
     if (pipe(pipe_fd_) == -1) { throw std::runtime_error("pipe() failed"); }
 #endif
 
-    saved_stderr_ = dup(_fileno(stderr));
+    saved_stderr_ = dup(fileno(stderr));
     if (saved_stderr_ == -1) { throw std::runtime_error("dup(stderr) failed"); }
 
-    if (dup2(pipe_fd_[1], _fileno(stderr)) == -1) { throw std::runtime_error("dup2(stderr) failed"); }
+    if (dup2(pipe_fd_[1], fileno(stderr)) == -1) { throw std::runtime_error("dup2(stderr) failed"); }
 
     close(pipe_fd_[1]);
     pipe_fd_[1] = -1;
@@ -49,7 +53,7 @@ _stderrCapture::restore() {
     fflush(stderr);
 
     if (saved_stderr_ != -1) {
-        dup2(saved_stderr_, _fileno(stderr));
+        dup2(saved_stderr_, fileno(stderr));
         close(saved_stderr_);
         saved_stderr_ = -1;
     }
