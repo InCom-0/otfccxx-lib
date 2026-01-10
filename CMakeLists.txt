@@ -8,7 +8,7 @@ project(otfccxx-lib
   LANGUAGES CXX C)
 
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
-option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
 option(OTFCCXX-LIB_BUILD_DEMOS "Build demos of otfccxx-lib" ${PROJECT_IS_TOP_LEVEL})
 # set(BUILD_SHARED_LIBS OFF)

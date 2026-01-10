@@ -442,9 +442,9 @@ public:
     Impl() = delete;
     // Impl(Bytes const &ttf) {}
     Impl(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex) {
-        otfccxx::fmem_file memfile(raw_ttfFont);
+        otfccxx::fmem_file memfile{};
 
-        otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
+        otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.attach(raw_ttfFont));
         if (! sfnt || sfnt->count == 0) { std::exit(1); }
         if (ttcindex >= sfnt->count) { std::exit(1); }
 

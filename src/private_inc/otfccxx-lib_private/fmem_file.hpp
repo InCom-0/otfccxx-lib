@@ -14,7 +14,7 @@ namespace otfccxx {
 struct fmem_file {
 public:
     // Construct from memory (copies data into memory-backed FILE*)
-    explicit fmem_file(std::span<const std::byte> data);
+    explicit fmem_file();
 
     // Destructor
     ~fmem_file();
@@ -29,13 +29,13 @@ public:
     fmem_file &
     operator=(fmem_file &&other) noexcept;
 
-    // Access underlying FILE*
+    // attach and access
     FILE *
-    get() const noexcept;
+    attach(std::span<const std::byte> data) const;
+
 
 private:
-    fmem *mem_;  // owned
-    FILE *file_; // owned
+    fmem *mem_; // owned
 };
 
 } // namespace otfccxx
