@@ -3,10 +3,16 @@
 #include <json-builder.h>
 #include <json.h>
 
-#include <harfbuzz/hb.h>
+
+#ifdef OTFCCXX_HARFBUZZ_BUILDFROMSOURCE
+#include <hb-subset.h>
+#include <hb.h>
+
+#else
 #include <harfbuzz/hb-subset.h>
-// #include <hb-set.hh>
-// #include <hb-subset.h>
+#include <harfbuzz/hb.h>
+#endif
+
 
 #include <otfcc/otfcc_api.h>
 
