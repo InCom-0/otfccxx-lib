@@ -10,8 +10,9 @@
 #include <vector>
 
 
-#if defined(_WIN32)
-#if defined(OTFCCXX_LIB_EXPORTS)
+#if defined(OTFCCXX_SHARED)
+#if defined(_WIN32) || defined(__CYGWIN__)
+#if defined(OTFCCXX_EXPORTS)
 #define OTFCCXX_API __declspec(dllexport)
 #else
 #define OTFCCXX_API __declspec(dllimport)
@@ -19,6 +20,12 @@
 #else
 #define OTFCCXX_API __attribute__((visibility("default")))
 #endif
+
+#else
+// Static library
+#define OTFCCXX_API
+#endif
+
 
 namespace otfccxx {
 
