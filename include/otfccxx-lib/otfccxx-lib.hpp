@@ -173,9 +173,12 @@ private:
 // TTF hints are always removed from the font
 class OTFCCXX_API Modifier {
 public:
-    Modifier() = delete;
     Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
+    Modifier(std::filesystem::path const &pth, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
+
+    Modifier() = delete;
     ~Modifier();
+
 
     // Changing dimensions of glyphs
     std::expected<bool, err_modifier>

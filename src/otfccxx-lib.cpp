@@ -405,9 +405,7 @@ RET:
 
         auto rf = pimpl->toKeep_unicodeCPs.get();
 
-        while (hb_set_next(pimpl->toKeep_unicodeCPs.get(), curCP.get())) {
-            resVec.push_back(*curCP);
-        }
+        while (hb_set_next(pimpl->toKeep_unicodeCPs.get(), curCP.get())) { resVec.push_back(*curCP); }
     }
 
     return std::make_pair(
@@ -445,6 +443,32 @@ public:
         otfccxx::fmem_file memfile{};
 
         otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.attach(raw_ttfFont));
+        if (! sfnt || sfnt->count == 0) { std::exit(1); }
+        if (ttcindex >= sfnt->count) { std::exit(1); }
+
+        // Build font
+        otfcc_IFontBuilder *reader = otfcc_newOTFReader();
+        _font                      = otfcc_Font_uptr(reader->read(sfnt, ttcindex, opts.pimpl.get()->_opts.get()));
+        if (! _font) { std::exit(1); }
+
+        // Free no longer needed stuff
+        reader->free(reader);
+        if (sfnt) { otfcc_deleteSFNT(sfnt); }
+
+        // Consolidate
+        otfcc_iFont.consolidate(_font.get(), opts.pimpl.get()->_opts.get());
+    }
+    Impl(std::filesystem::path const &pth, Options const &opts, uint32_t ttcindex) {
+
+        // TODO: Needs to rounded off as opposed to hard exit
+        FILE *file = std::fopen(pth.string().c_str(), "rb"); // "rb" = read binary
+        if (! file) {
+            std::perror("Failed to open file");
+            std::exit(1);
+        }
+
+        otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(file);
+
         if (! sfnt || sfnt->count == 0) { std::exit(1); }
         if (ttcindex >= sfnt->count) { std::exit(1); }
 
@@ -766,6 +790,9 @@ private:
 
 Modifier::Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex, Options const &opts)
     : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
+
+Modifier::Modifier(std::filesystem::path const &pth, uint32_t ttcindex, Options const &opts)
+    : pimpl(std::make_unique<Impl>(pth, opts, ttcindex)) {}
 
 Modifier::~Modifier() = default;
 
