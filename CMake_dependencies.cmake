@@ -1,6 +1,6 @@
 include(cmake/CPM.cmake)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 if(NOT CPM_USE_LOCAL_PACKAGES)
   set(CPM_USE_LOCAL_PACKAGES ON)
