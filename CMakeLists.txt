@@ -48,6 +48,7 @@ if(otfccxx_BUILD_SHARED_LIB)
 else()
   add_library(otfccxx STATIC)
 endif()
+add_library(otfccxx::otfccxx ALIAS otfccxx)
 
 target_sources(otfccxx PRIVATE src/otfccxx.cpp src/fmem_file.cpp src/machinery_stderr_capt.cpp)
 target_sources(otfccxx
