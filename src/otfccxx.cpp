@@ -12,6 +12,8 @@
 #include <woff2/encode.h>
 #include <woff2/output.h>
 
+#include <base64.hpp>
+
 #include <otfccxx/otfccxx.hpp>
 
 #include <otfccxx_private/fmem_file.hpp>
@@ -900,8 +902,22 @@ Converter::decode_Woff2(ByteSpan ttf) {
 }
 
 std::expected<std::string, err_converter>
-encode_base64(ByteSpan ttf) {
-    return std::unexpected(err_converter::unknownError);
+Converter::encode_base64(ByteSpan bytes) noexcept {
+    try {
+        return base64::encode_into<std::string>(bytes.begin(), bytes.end());
+    }
+    catch (...) {
+        return std::unexpected(err_converter::unknownError);
+    }
+}
+std::expected<Bytes, err_converter>
+Converter::decode_base64(std::string_view base64Encoded) noexcept {
+    try {
+        return base64::decode_into<Bytes>(base64Encoded);
+    }
+    catch (...) {
+        return std::unexpected(err_converter::unknownError);
+    }
 }
 
 

@@ -27,6 +27,11 @@ CPMAddPackage(
   OPTIONS "NOISY_LOGGING OFF" "BUILD_SHARED_LIBS OFF"
   FIND_PACKAGE_ARGUMENTS NAME WOFF2
 )
+CPMAddPackage(
+  URI "gh:tobiaslocker/base64#master"
+  NAME base64tl
+)
+
 
 
 if(harfbuzz_ADDED)
@@ -43,4 +48,8 @@ endif()
 
 if(woff2_ADDED)
   set(OTFCCXX_WOFF2_BUILDFROMSOURCE TRUE)
+endif()
+
+if(base64tl_ADDED)
+  set(OTFCCXX_BASE64TL_BUILDFROMSOURCE TRUE)
 endif()

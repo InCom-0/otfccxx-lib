@@ -65,7 +65,7 @@ target_sources(otfccxx
   BASE_DIRS
   src/private_inc)
 
-target_link_libraries(otfccxx PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec otfcc_lib::otfcc_lib fmem::fmem)
+target_link_libraries(otfccxx PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec otfcc_lib::otfcc_lib fmem::fmem base64)
 
 target_compile_features(otfccxx PRIVATE cxx_std_23)
 set_target_properties(otfccxx PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
@@ -89,6 +89,9 @@ if(otfccxx_BUILD_DEMOS)
   add_executable(scratch demos/demo_1.cpp)
   target_compile_features(scratch PRIVATE cxx_std_23)
   target_link_libraries(scratch PRIVATE otfccxx)
+  if(USING_LIBSTDCXX)
+    target_link_libraries(scratch PRIVATE "-lstdc++exp")
+  endif()
 endif()
 
 

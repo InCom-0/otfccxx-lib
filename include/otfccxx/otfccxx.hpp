@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <utility>
 
 #include <cstddef>
@@ -226,9 +227,11 @@ public:
     encode_Woff2(ByteSpan ttf);
     [[nodiscard]] static std::expected<Bytes, err_converter>
     decode_Woff2(ByteSpan ttf);
-    
+
     [[nodiscard]] static std::expected<std::string, err_converter>
-    encode_base64(ByteSpan ttf);
+    encode_base64(ByteSpan bytes) noexcept;
+    [[nodiscard]] static std::expected<Bytes, err_converter>
+    decode_base64(std::string_view base64Encoded) noexcept;
 };
 
 } // namespace otfccxx
