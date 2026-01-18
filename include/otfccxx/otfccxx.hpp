@@ -226,6 +226,9 @@ public:
     encode_Woff2(ByteSpan ttf);
     [[nodiscard]] static std::expected<Bytes, err_converter>
     decode_Woff2(ByteSpan ttf);
+    
+    [[nodiscard]] static std::expected<std::string, err_converter>
+    encode_base64(ByteSpan ttf);
 };
 
 } // namespace otfccxx

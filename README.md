@@ -7,7 +7,7 @@
 
 The primary usecase is the ability to produce 'minified' (web)fonts that can be embedded into html/css (ie. fonts that only include the glyphs actually present in the html document) and that are at the same time 'size-compatibile' with each other ... and being able to do that 'on the fly' in a reasonably performant way.
 
-Explanatory note: The goal is to enable a way so that one can use several fonts together in a way so that they complement each other in Unicode codepoint coverage (because fonts often include only the glyphs for the most common Unicode codepoints such as the latin letter) by adjusting and modifying the fonts (the glyphs themselves, the font metrics and so on) in such a way that they will be visually compatible once their glyphs are rendered (for example by a web browser).
+Explanatory note: The goal is to enable a way to use several fonts together in a way so that they complement each other in Unicode codepoint coverage (because fonts often include only the glyphs for the most common Unicode codepoints such as the latin letter) by adjusting and modifying the fonts (the glyphs themselves, the font metrics and so on) in such a way that they will be visually compatible once their glyphs are rendered (for example by a web browser).
 This is as opposed to somehow 'splicing' fonts together which is (in the author's opinion) borderline impossible to do programmatically.
 
 Note: The results obtained using such programmatic modifications of fonts are not expected to be 'typographically perfect'. However, anecdotal testing has shown that the results can be more than acceptable and are often very good (author's opinion). 

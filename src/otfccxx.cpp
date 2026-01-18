@@ -899,5 +899,10 @@ Converter::decode_Woff2(ByteSpan ttf) {
     return output;
 }
 
+std::expected<std::string, err_converter>
+encode_base64(ByteSpan ttf) {
+    return std::unexpected(err_converter::unknownError);
+}
+
 
 } // namespace otfccxx
