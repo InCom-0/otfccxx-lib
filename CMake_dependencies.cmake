@@ -29,6 +29,7 @@ CPMAddPackage(
 )
 CPMAddPackage(
   URI "gh:tobiaslocker/base64#master"
+  OPTIONS "BASE64_ENABLE_TESTING OFF"
   NAME base64tl
 )
 
