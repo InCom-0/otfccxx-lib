@@ -17,24 +17,9 @@ option(otfccxx_BUILD_SHARED_LIB "Build a shared version of otfccxx" ${BUILD_SHAR
 #####################################################################
 ### Staging ###
 #####################################################################
-include(GNUInstallDirs)
-
-set(OTFCCXX_STAGEDIR ${CMAKE_CURRENT_BINARY_DIR}/stage)
-
-if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
-  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
-    ${OTFCCXX_STAGEDIR}/${CMAKE_INSTALL_BINDIR}
-  )
-endif()
-if(NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
-  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY
-    ${OTFCCXX_STAGEDIR}/${CMAKE_INSTALL_LIBDIR}
-  )
-endif()
-if(NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
-  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
-    ${OTFCCXX_STAGEDIR}/${CMAKE_INSTALL_LIBDIR}
-  )
+include(cmake/StageOutputs.cmake)
+if(otfccxx_STAGE_OUTPUTS)
+    stageOutputDirsFor(otfccxx)
 endif()
 
 
