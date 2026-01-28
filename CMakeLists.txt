@@ -9,6 +9,7 @@ project(otfccxx
 
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(otfccxx_STAGE_OUTPUTS "Stage build output artifacts into proper directory structure" ${PROJECT_IS_TOP_LEVEL})
 
 option(otfccxx_BUILD_DEMOS "Build demos for otfccxx" ${PROJECT_IS_TOP_LEVEL})
 option(otfccxx_BUILD_SHARED_LIB "Build a shared version of otfccxx" ${BUILD_SHARED_LIBS})
